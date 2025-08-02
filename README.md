@@ -47,8 +47,11 @@ polymarket-extract "URL" -i 1h -d 7
 # Specific date range
 polymarket-extract "URL" --start 2024-01-01 --end 2024-01-31
 
-# Export to multiple formats
+# Export to multiple formats (saves to data/ directory by default)
 polymarket-extract "URL" -o market_data -f csv json excel
+
+# Export to specific directory
+polymarket-extract "URL" -o /path/to/output -f csv
 
 # With API key
 polymarket-extract "URL" --api-key YOUR_API_KEY
@@ -159,7 +162,7 @@ export POLYMARKET_LOG_LEVEL="INFO"
 | `-d, --days` | Number of days of history | 30 |
 | `--start` | Start date (YYYY-MM-DD) | None |
 | `--end` | End date (YYYY-MM-DD) | None |
-| `-o, --output` | Output file path (without extension) | None |
+| `-o, --output` | Output file path (without extension). Saves to `data/` by default | None |
 | `-f, --formats` | Output formats (csv, json, excel, parquet) | csv |
 | `--api-key` | CLOB API key | None |
 | `--summary` | Print summary report | False |
@@ -374,7 +377,7 @@ polymarket-extract "https://polymarket.com/will-x-happen-by-2025"
 # Minute-level data for past 24 hours
 polymarket-extract "https://polymarket.com/will-x-happen" -i 1m -d 1
 
-# Export last 90 days to all formats
+# Export last 90 days to all formats (saves to data/analysis.*)
 polymarket-extract "URL" -d 90 -o analysis -f csv json excel parquet
 
 # Generate summary report

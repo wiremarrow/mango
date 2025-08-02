@@ -325,7 +325,11 @@ Examples:
             
             for format in args.formats:
                 try:
-                    filepath = f"{args.output}.{format}"
+                    # If output path doesn't start with / or contain /, prepend data/
+                    if not args.output.startswith('/') and '/' not in args.output:
+                        filepath = f"data/{args.output}.{format}"
+                    else:
+                        filepath = f"{args.output}.{format}"
                     
                     if format == "csv":
                         DataProcessor.save_to_file(

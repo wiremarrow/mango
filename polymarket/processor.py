@@ -217,6 +217,7 @@ class DataProcessor:
             ExportError: If file save fails
         """
         filepath = Path(filepath)
+        # Ensure parent directory exists (including data/ directory)
         filepath.parent.mkdir(parents=True, exist_ok=True)
         
         try:
