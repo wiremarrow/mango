@@ -51,6 +51,7 @@ setup(
     entry_points={
         "console_scripts": [
             "polymarket-extract=polymarket_extract:main",
+            "mango=mango_cli:main",
         ],
     },
     project_urls={

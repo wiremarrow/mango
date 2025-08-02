@@ -15,10 +15,11 @@ from datetime import datetime
 
 from .models import Market, Event, PriceHistory, PricePoint, TimeInterval
 from .config import (
-    CLOB_BASE_URL, GAMMA_BASE_URL, DEFAULT_TIMEOUT,
+    CLOB_BASE_URL, GAMMA_BASE_URL, DATA_API_URL, DEFAULT_TIMEOUT,
     MAX_RETRIES, RETRY_DELAY, USER_AGENT
 )
 from .exceptions import APIError, RateLimitError, MarketNotFoundError
+from .orderbook import OrderBook, MarketOrderBooks
 
 
 logger = logging.getLogger(__name__)
@@ -326,6 +327,123 @@ class CLOBAPIClient(BaseAPIClient):
                 results[outcome] = history
                 
         return results
+    
+    def get_order_book(self, token_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get the order book for a specific token.
+        
+        Args:
+            token_id: Token ID to get book for
+            
+        Returns:
+            Order book data with bids and asks
+        """
+        try:
+            response = self._request_with_retry('GET', '/book', params={'token_id': token_id})
+            return response.json()
+        except Exception as e:
+            logger.error(f"Error fetching order book for token {token_id}: {e}")
+            return None
+    
+    def get_order_books(self, token_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        Get order books for multiple tokens.
+        
+        Args:
+            token_ids: List of token IDs
+            
+        Returns:
+            Dict mapping token IDs to order book data
+        """
+        # Build params for multiple tokens
+        params = []
+        for token_id in token_ids:
+            params.append(('token_id', token_id))
+            
+        try:
+            response = self._request_with_retry('GET', '/books', params=params)
+            data = response.json()
+            
+            # Map response to token IDs
+            result = {}
+            for item in data:
+                if 'token_id' in item:
+                    result[item['token_id']] = item
+                    
+            return result
+        except Exception as e:
+            logger.error(f"Error fetching order books: {e}")
+            return {}
+    
+    def get_midpoint(self, token_id: str) -> Optional[float]:
+        """
+        Get midpoint price for a token.
+        
+        Args:
+            token_id: Token ID
+            
+        Returns:
+            Midpoint price or None
+        """
+        try:
+            response = self._request_with_retry('GET', '/midpoint', params={'token_id': token_id})
+            data = response.json()
+            return float(data.get('mid', 0)) if data else None
+        except Exception as e:
+            logger.error(f"Error fetching midpoint for token {token_id}: {e}")
+            return None
+    
+    def get_spread(self, token_id: str) -> Optional[Dict[str, float]]:
+        """
+        Get spread information for a token.
+        
+        Args:
+            token_id: Token ID
+            
+        Returns:
+            Dict with spread data or None
+        """
+        try:
+            response = self._request_with_retry('GET', '/spread', params={'token_id': token_id})
+            data = response.json()
+            if data:
+                return {
+                    'spread': float(data.get('spread', 0)),
+                    'spread_percent': float(data.get('spread_percent', 0))
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching spread for token {token_id}: {e}")
+            return None
+    
+    def get_prices(self, token_ids: List[str], side: str = 'mid') -> Dict[str, float]:
+        """
+        Get prices for multiple tokens.
+        
+        Args:
+            token_ids: List of token IDs
+            side: Price side ('bid', 'ask', or 'mid')
+            
+        Returns:
+            Dict mapping token IDs to prices
+        """
+        params = [('side', side)]
+        for token_id in token_ids:
+            params.append(('token_id', token_id))
+            
+        try:
+            response = self._request_with_retry('GET', '/prices', params=params)
+            data = response.json()
+            
+            result = {}
+            for item in data:
+                if 'token_id' in item and 'price' in item:
+                    result[item['token_id']] = float(item['price'])
+                    
+            return result
+        except Exception as e:
+            logger.error(f"Error fetching prices: {e}")
+            return {}
 
 
 class PolymarketAPI:
@@ -339,6 +457,9 @@ class PolymarketAPI:
     def __init__(self, api_key: Optional[str] = None):
         self.gamma_client = GammaAPIClient()
         self.clob_client = CLOBAPIClient(api_key=api_key)
+        # Import here to avoid circular dependency
+        from .data_api import DataAPIClient
+        self.data_client = DataAPIClient()
         
     def get_market(self, slug: str) -> Optional[Market]:
         """
@@ -453,10 +574,100 @@ class PolymarketAPI:
         # query the market's event relationship directly
         return market
     
+    def get_order_books(self, market: Market) -> MarketOrderBooks:
+        """
+        Get order books for all outcomes in a market.
+        
+        Args:
+            market: Market object
+            
+        Returns:
+            MarketOrderBooks object with books for each outcome
+        """
+        # Get raw order book data
+        book_data = self.clob_client.get_order_books(market.token_ids)
+        
+        # Create OrderBook objects for each outcome
+        books = {}
+        for token_id, outcome in zip(market.token_ids, market.outcomes):
+            if token_id in book_data:
+                books[outcome] = OrderBook.from_api_response(
+                    book_data[token_id], 
+                    token_id, 
+                    outcome
+                )
+        
+        return MarketOrderBooks(
+            market_id=market.condition_id,
+            question=market.question,
+            books=books
+        )
+    
+    def get_market_prices(self, market: Market, side: str = 'mid') -> Dict[str, float]:
+        """
+        Get current prices for all outcomes in a market.
+        
+        Args:
+            market: Market object
+            side: Price side ('bid', 'ask', or 'mid')
+            
+        Returns:
+            Dict mapping outcomes to prices
+        """
+        prices = self.clob_client.get_prices(market.token_ids, side)
+        
+        # Map token IDs to outcomes
+        result = {}
+        for token_id, outcome in zip(market.token_ids, market.outcomes):
+            if token_id in prices:
+                result[outcome] = prices[token_id]
+                
+        return result
+    
+    def get_user_positions(self, address: str, **kwargs) -> List[Dict[str, Any]]:
+        """
+        Get user positions from Data API.
+        
+        Args:
+            address: User's wallet address
+            **kwargs: Additional filter parameters
+            
+        Returns:
+            List of position objects
+        """
+        return self.data_client.get_user_positions(address, **kwargs)
+    
+    def get_user_activity(self, address: str, **kwargs) -> List[Dict[str, Any]]:
+        """
+        Get user activity history from Data API.
+        
+        Args:
+            address: User's wallet address
+            **kwargs: Additional filter parameters
+            
+        Returns:
+            List of activity objects
+        """
+        return self.data_client.get_user_activity(address, **kwargs)
+    
+    def get_market_holders(self, market_id: str, **kwargs) -> List[Dict[str, Any]]:
+        """
+        Get holders for a market from Data API.
+        
+        Args:
+            market_id: Market condition ID
+            **kwargs: Additional filter parameters
+            
+        Returns:
+            List of holder objects
+        """
+        return self.data_client.get_market_holders(market_id, **kwargs)
+    
     def close(self):
         """Close all API clients."""
         self.gamma_client.close()
         self.clob_client.close()
+        self.data_client.close()
         
     def __enter__(self):
         return self

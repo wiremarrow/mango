@@ -11,6 +11,8 @@ from .models import Market, Event, PriceHistory, PricePoint, MarketHistoricalDat
 from .api import PolymarketAPI
 from .parser import PolymarketURLParser
 from .processor import DataProcessor
+from .orderbook import OrderBook, OrderLevel, MarketOrderBooks
+from .data_api import DataAPIClient
 
 __all__ = [
     "Market",
@@ -22,4 +24,8 @@ __all__ = [
     "PolymarketAPI",
     "PolymarketURLParser",
     "DataProcessor",
+    "OrderBook",
+    "OrderLevel",
+    "MarketOrderBooks",
+    "DataAPIClient",
 ]

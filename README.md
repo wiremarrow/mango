@@ -1,18 +1,23 @@
-# Polymarket Data Extractor
+# Mango - Enhanced Polymarket Toolkit
 
-A professional Python library for extracting historical price data from Polymarket prediction markets. Built with clean architecture principles for algorithmic trading applications.
+A comprehensive Python library and CLI for Polymarket prediction markets. Extract historical data, monitor order books, track portfolios, and analyze markets with professional-grade tools.
 
 ## Features
 
+### Core Capabilities
+- **Historical Data Extraction**: Complete price history for all market outcomes
+- **Order Book Analysis**: Real-time order book depth, spreads, and liquidity
+- **Portfolio Tracking**: Monitor positions, P&L, and trading activity
+- **Market Discovery**: Search and analyze markets with advanced filters
+- **Multi-API Integration**: CLOB, Gamma, and Data APIs with automatic fallback
+
+### Technical Features
 - **Clean Architecture**: Modular design with clear separation of concerns
-- **Multiple API Support**: Seamlessly integrates CLOB and Gamma APIs with automatic fallback
-- **Comprehensive Data**: Fetches complete price history for all market outcomes
-- **Flexible Time Intervals**: Support for 1m, 1h, 6h, 1d, 1w, and max intervals
 - **Multiple Export Formats**: CSV, JSON, Excel, and Parquet
 - **Robust Error Handling**: Retry logic, rate limiting, and clear error messages
 - **Type Safety**: Full type hints throughout the codebase
-- **Configurable**: Environment variables and configuration management
-- **Logging**: Comprehensive logging for debugging and monitoring
+- **Flexible Configuration**: Environment variables and settings management
+- **Professional CLI**: Rich command-line interface with multiple output formats
 
 ## Installation
 
@@ -31,7 +36,36 @@ pip install -e .
 
 ## Quick Start
 
-### Basic Usage
+### Mango CLI - New Enhanced Commands
+
+#### Market Discovery
+```bash
+# Search for markets
+mango search "presidential election" --min-volume 10000
+
+# Get detailed market information with order book
+mango market-info "will-trump-win-2024" --show-book --depth 20
+
+# View real-time order book
+mango book "will-trump-win-2024" --format json -o orderbook.json
+
+# Get current prices and spreads
+mango price "will-trump-win-2024"
+```
+
+#### Portfolio Management
+```bash
+# View portfolio positions
+mango portfolio 0xYourAddress --min-size 100 --show-pnl
+
+# Get trading history
+mango history 0xYourAddress --days 30 --type TRADE
+
+# Analyze market holders
+mango holders "will-trump-win-2024" --top 50 --outcome "Yes"
+```
+
+### Historical Data Extraction (Original)
 
 Extract 30 days of daily price data:
 ```bash
@@ -59,6 +93,7 @@ polymarket-extract "URL" --api-key YOUR_API_KEY
 
 ## Library Usage
 
+### Basic Market Data
 ```python
 from polymarket import PolymarketAPI, DataProcessor
 from polymarket.models import TimeInterval
@@ -76,35 +111,68 @@ price_histories = api.get_price_history(
     start_ts=1234567890,
     end_ts=1234567890
 )
+```
 
-# Process and export data
-from polymarket.models import MarketHistoricalData
-data = MarketHistoricalData(market=market, price_histories=price_histories)
+### Order Book Analysis
+```python
+# Get order books for all outcomes
+order_books = api.get_order_books(market)
 
-# Export to CSV
-DataProcessor.save_to_file(data, "output.csv", format="csv")
+# Analyze specific outcome
+yes_book = order_books.get_outcome_book("Yes")
+print(f"Best bid: ${yes_book.best_bid.price}")
+print(f"Best ask: ${yes_book.best_ask.price}")
+print(f"Spread: ${yes_book.spread} ({yes_book.spread_percent:.2f}%)")
 
-# Get statistics
-for outcome, history in price_histories.items():
-    stats = DataProcessor.calculate_statistics(history)
-    print(f"{outcome}: {stats}")
+# Calculate market impact
+impact = yes_book.get_market_impact(size=10000, side='buy')
+print(f"Avg price for 10k shares: ${impact['average_price']}")
+print(f"Slippage: {impact['slippage_percent']:.2f}%")
+```
+
+### Portfolio Management
+```python
+# Get user positions
+positions = api.get_user_positions(
+    "0xUserAddress",
+    min_size=100,
+    sort_by="VALUE"
+)
+
+# Get trading activity
+activities = api.get_user_activity(
+    "0xUserAddress",
+    activity_types=["TRADE", "REWARD"],
+    limit=100
+)
+
+# Analyze market holders
+holders = api.get_market_holders(
+    market.condition_id,
+    outcome="Yes",
+    min_size=1000
+)
 ```
 
 ## Project Structure
 
 ```
-polymarket-data/
+mango/
 ├── polymarket/              # Main package
 │   ├── __init__.py         # Package initialization and exports
 │   ├── api.py              # API clients (CLOB, Gamma, unified interface)
+│   ├── data_api.py         # Data API client for positions and activity
+│   ├── orderbook.py        # Order book models and analysis
 │   ├── models.py           # Data models and type definitions
 │   ├── parser.py           # URL parsing and slug extraction
 │   ├── processor.py        # Data processing, statistics, and export
 │   ├── config.py           # Configuration and environment variables
 │   └── exceptions.py       # Custom exception hierarchy
-├── polymarket_extract.py    # CLI script entry point
+├── mango_cli.py            # Enhanced CLI with new commands
+├── polymarket_extract.py   # Original data extraction CLI
 ├── setup.py                # Package setup and metadata
 ├── requirements.txt        # Production dependencies
+├── CLAUDE.md              # AI assistant context document
 └── README.md              # This file
 ```
 
@@ -153,7 +221,26 @@ export POLYGON_RPC_URL="https://polygon-rpc.com"
 export POLYMARKET_LOG_LEVEL="INFO"
 ```
 
-## Command Line Options
+## Mango CLI Commands
+
+### Market Commands
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `search` | Search for markets by keyword | `mango search "bitcoin" --limit 10` |
+| `market-info` | Get detailed market information | `mango market-info "btc-50k-2024" --show-book` |
+| `book` | View order book depth | `mango book "btc-50k-2024" --depth 50` |
+| `price` | Get current prices and spreads | `mango price "btc-50k-2024"` |
+
+### Portfolio Commands
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `portfolio` | View user positions | `mango portfolio 0xABC123 --min-size 100` |
+| `history` | Get trading activity | `mango history 0xABC123 --days 7` |
+| `holders` | Analyze market holders | `mango holders "btc-50k-2024" --top 20` |
+
+## Original Extract Command Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -194,21 +281,38 @@ The library uses multiple Polymarket APIs with intelligent fallback:
 ### 1. CLOB API (Primary)
 - **Base URL**: `https://clob.polymarket.com`
 - **Purpose**: Trading data and real-time market information
-- **Features**: Market discovery, price history endpoints
-- **Authentication**: Optional API key support
+- **Endpoints**: 
+  - Order books (`/book`, `/books`)
+  - Current prices (`/prices`, `/midpoint`, `/spread`)
+  - Historical data (`/prices-history`)
+  - Market discovery (`/markets`)
+- **Authentication**: Optional API key for enhanced limits
 
-### 2. Gamma API (Fallback)
+### 2. Gamma API (Metadata)
 - **Base URL**: `https://gamma-api.polymarket.com`
 - **Purpose**: Market and event metadata
-- **Features**: Rich market details, event grouping, search functionality
+- **Endpoints**:
+  - Market search and filtering
+  - Event grouping and relationships
+  - Rich metadata (descriptions, tags, etc.)
 - **Authentication**: Public API, no key required
 
-### 3. Unified API Interface
+### 3. Data API (Portfolio)
+- **Base URL**: `https://data-api.polymarket.com`
+- **Purpose**: User positions and on-chain activity
+- **Endpoints**:
+  - User positions (`/positions`)
+  - Trading activity (`/activity`)
+  - Market holders (`/holders`)
+  - Holdings value history (`/holdings-value`)
+- **Authentication**: No key required for public data
+
+### 4. Unified API Interface
 The `PolymarketAPI` class provides a seamless interface that:
-- Automatically tries CLOB API first for most up-to-date data
-- Falls back to Gamma API if market not found
-- Merges search results from both APIs
-- Handles authentication and rate limiting transparently
+- Automatically routes requests to the appropriate API
+- Handles fallbacks for redundant data sources
+- Manages authentication and rate limiting
+- Provides consistent data models across APIs
 
 ## Data Models
 
@@ -255,6 +359,18 @@ Complete dataset for analysis:
 - `market`: Market object
 - `price_histories`: Dict mapping outcomes to PriceHistory
 - `extracted_at`: Timestamp of data extraction
+
+### OrderBook
+Real-time order book data:
+- `bids`: List of OrderLevel objects (price, size)
+- `asks`: List of OrderLevel objects (price, size)
+- Properties: `best_bid`, `best_ask`, `mid_price`, `spread`
+- Methods: `get_depth()`, `get_market_impact()`, `get_cumulative_depth()`
+
+### MarketOrderBooks
+Order books for all outcomes in a market:
+- `books`: Dict mapping outcomes to OrderBook objects
+- Methods: `get_spreads()`, `get_mid_prices()`, `get_best_prices()`
 
 ## URL Parser
 
@@ -363,49 +479,83 @@ For grouped prediction markets (negRisk):
 
 ## Examples
 
-### Extract Event Markets
+### Market Discovery and Analysis
 ```bash
-# View all markets in an event
-polymarket-extract "https://polymarket.com/event/2024-presidential-election"
+# Search for active markets with volume
+mango search "climate change" --min-volume 50000 --limit 10
+
+# Get detailed market info with order book
+mango market-info "will-global-temp-rise-2c" --show-book --depth 20
+
+# Export order book data
+mango book "will-global-temp-rise-2c" --format json -o data/climate_book.json
+
+# Monitor real-time prices
+mango price "will-global-temp-rise-2c"
 ```
 
-### Extract Specific Market Data
+### Portfolio Management
 ```bash
-# Daily data for 30 days
-polymarket-extract "https://polymarket.com/will-x-happen-by-2025"
+# View all positions worth over $100
+mango portfolio 0x123...abc --min-size 100 --show-pnl
 
-# Minute-level data for past 24 hours
+# Get 30-day trading history
+mango history 0x123...abc --days 30 --type TRADE --format json
+
+# Find top holders in a market
+mango holders "will-btc-hit-100k" --top 50 --outcome "Yes"
+```
+
+### Historical Data Extraction
+```bash
+# Extract event markets
+polymarket-extract "https://polymarket.com/event/2024-presidential-election"
+
+# Get minute-level data for analysis
 polymarket-extract "https://polymarket.com/will-x-happen" -i 1m -d 1
 
-# Export last 90 days to all formats (saves to data/analysis.*)
+# Export last 90 days to all formats
 polymarket-extract "URL" -d 90 -o analysis -f csv json excel parquet
-
-# Generate summary report
-polymarket-extract "URL" --summary
 ```
 
 ### Programmatic Usage
 ```python
-from polymarket import PolymarketAPI, PolymarketURLParser, DataProcessor
-from polymarket.models import TimeInterval, MarketHistoricalData
+from polymarket import PolymarketAPI, OrderBook
+from decimal import Decimal
 
-# Parse URL
-parser = PolymarketURLParser()
-slug = parser.get_api_slug("https://polymarket.com/market/example")
+# Initialize API
+api = PolymarketAPI(api_key="your_key")
 
-# Fetch data
-api = PolymarketAPI()
-market = api.get_market(slug)
-histories = api.get_price_history(market, TimeInterval.ONE_HOUR)
+# Market discovery
+markets = api.search_markets("inflation", limit=5)
+for market in markets:
+    print(f"{market.question}: ${market.volume:,.0f}")
 
-# Analyze
-data = MarketHistoricalData(market=market, price_histories=histories)
-for outcome, history in histories.items():
-    stats = DataProcessor.calculate_statistics(history)
-    print(f"{outcome}: Mean={stats['mean']:.4f}, Vol={stats['volatility']:.4f}")
+# Order book analysis
+market = api.get_market("fed-rate-hike-2024")
+books = api.get_order_books(market)
 
-# Export
-DataProcessor.save_to_file(data, "analysis.xlsx", format="excel")
+yes_book = books.get_outcome_book("Yes")
+print(f"Best bid: ${yes_book.best_bid.price}")
+print(f"Best ask: ${yes_book.best_ask.price}")
+print(f"Spread: {yes_book.spread_percent:.2f}%")
+
+# Calculate market impact for large order
+impact = yes_book.get_market_impact(
+    size=Decimal('50000'), 
+    side='buy'
+)
+print(f"50k shares would move price by {impact['slippage_percent']:.2f}%")
+
+# Portfolio tracking
+positions = api.get_user_positions(
+    "0xYourAddress",
+    min_size=500,
+    sort_by="VALUE"
+)
+
+total_value = sum(p['current_value'] for p in positions)
+print(f"Portfolio value: ${total_value:,.2f}")
 ```
 
 ## Development

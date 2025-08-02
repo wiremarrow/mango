@@ -12,6 +12,7 @@ from typing import Optional
 # API Endpoints
 CLOB_BASE_URL = os.getenv("POLYMARKET_CLOB_URL", "https://clob.polymarket.com")
 GAMMA_BASE_URL = os.getenv("POLYMARKET_GAMMA_URL", "https://gamma-api.polymarket.com")
+DATA_API_URL = os.getenv("POLYMARKET_DATA_API_URL", "https://data-api.polymarket.com")
 
 # HTTP Client Settings
 DEFAULT_TIMEOUT = float(os.getenv("POLYMARKET_TIMEOUT", "30.0"))
