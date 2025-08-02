@@ -325,3 +325,48 @@ class MarketHistoricalData:
             },
             'extracted_at': self.extracted_at.isoformat()
         }
+
+
+@dataclass
+class EventHistoricalData:
+    """Complete historical data for all markets in an event."""
+    event: Event
+    market_data: Dict[str, MarketHistoricalData] = field(default_factory=dict)
+    extracted_at: datetime = field(default_factory=datetime.now)
+    
+    @property
+    def total_markets(self) -> int:
+        """Total number of markets with data."""
+        return len(self.market_data)
+    
+    @property
+    def has_data(self) -> bool:
+        """Check if any market has data."""
+        return any(data.has_data for data in self.market_data.values())
+    
+    def get_aligned_timestamps(self) -> List[datetime]:
+        """Get all unique timestamps across all markets, sorted."""
+        all_timestamps = set()
+        for market_data in self.market_data.values():
+            for history in market_data.price_histories.values():
+                for point in history.price_points:
+                    all_timestamps.add(point.timestamp)
+        return sorted(all_timestamps)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            'event': {
+                'id': self.event.id,
+                'title': self.event.title,
+                'slug': self.event.slug,
+                'description': self.event.description,
+                'neg_risk': self.event.neg_risk,
+                'total_markets': self.total_markets
+            },
+            'market_data': {
+                market_slug: data.to_dict()
+                for market_slug, data in self.market_data.items()
+            },
+            'extracted_at': self.extracted_at.isoformat()
+        }

@@ -6,6 +6,7 @@ A comprehensive Python library and CLI for Polymarket prediction markets. Extrac
 
 ### Core Capabilities
 - **Historical Data Extraction**: Complete price history for all market outcomes
+- **Event-Wide Data Extraction**: Extract all markets from an event in one command (NEW!)
 - **Order Book Analysis**: Real-time order book depth, spreads, and liquidity
 - **Portfolio Tracking**: Monitor positions, P&L, and trading activity
 - **Market Discovery**: Search and analyze markets with advanced filters
@@ -255,6 +256,8 @@ export POLYMARKET_LOG_LEVEL="INFO"
 | `--summary` | Print summary report | False |
 | `--no-metadata` | Exclude metadata from CSV | False |
 | `-v, --verbose` | Enable verbose logging | False |
+| `--extract-all-markets` | Extract all markets from an event URL | False |
+| `--column-format` | Column naming for event exports (short, full, descriptive) | short |
 
 ## Architecture
 
@@ -273,6 +276,37 @@ export POLYMARKET_LOG_LEVEL="INFO"
 - **Processor Module**: Data transformation, statistics, and export
 - **Config Module**: Centralized configuration management
 - **Exceptions Module**: Hierarchical exception structure
+
+## Event Data Extraction (NEW!)
+
+The `--extract-all-markets` flag enables extracting data from all markets within an event simultaneously:
+
+### How It Works
+1. Fetches all markets in the specified event
+2. Extracts price history for each market with progress tracking
+3. Merges all data into a single wide-format DataFrame
+4. Exports with customizable column naming
+
+### Column Naming Formats
+- **short**: Uses team/candidate names (e.g., `liverpool_yes`, `liverpool_no`)
+- **full**: Uses complete market slugs
+- **descriptive**: Uses full question text
+
+### Output Format
+The CSV output has timestamps as rows and market outcomes as columns:
+```
+timestamp,liverpool_yes,liverpool_no,manchester_city_yes,manchester_city_no,...
+2024-01-01 00:00:00,0.335,0.665,0.205,0.795,...
+2024-01-01 01:00:00,0.336,0.664,0.204,0.796,...
+```
+
+### Example Use Cases
+- **Elections**: Track all candidates in one file
+- **Sports Championships**: Monitor all teams' odds over time
+- **Economic Events**: Compare multiple outcome scenarios
+
+### Performance Note
+Extracting large events (20+ markets) may take several minutes due to rate limiting.
 
 ## API Architecture
 
@@ -510,14 +544,22 @@ mango holders "will-btc-hit-100k" --top 50 --outcome "Yes"
 
 ### Historical Data Extraction
 ```bash
-# Extract event markets
-polymarket-extract "https://polymarket.com/event/2024-presidential-election"
+# Extract single market
+polymarket-extract "https://polymarket.com/will-x-happen"
 
 # Get minute-level data for analysis
 polymarket-extract "https://polymarket.com/will-x-happen" -i 1m -d 1
 
 # Export last 90 days to all formats
 polymarket-extract "URL" -d 90 -o analysis -f csv json excel parquet
+
+# Extract ALL markets from an event (new feature!)
+polymarket-extract "https://polymarket.com/event/english-premier-league-winner" \
+  --extract-all-markets -o epl_all_teams -f csv
+
+# Extract event with custom column naming
+polymarket-extract "https://polymarket.com/event/2024-presidential-election" \
+  --extract-all-markets --column-format short -o election_data
 ```
 
 ### Programmatic Usage

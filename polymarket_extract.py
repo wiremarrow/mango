@@ -12,11 +12,11 @@ import logging
 import time
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Union
 
 from polymarket import (
     PolymarketAPI, PolymarketURLParser, DataProcessor,
-    MarketHistoricalData, TimeInterval
+    MarketHistoricalData, TimeInterval, EventHistoricalData
 )
 from polymarket.config import (
     DEFAULT_DAYS_BACK, DEFAULT_INTERVAL, DEFAULT_EXPORT_FORMAT,
@@ -193,6 +193,112 @@ class PolymarketExtractor:
             print(f"\nUnexpected error: {e}")
             return None
     
+    def extract_all_event_markets(self,
+                                 event_slug: str,
+                                 interval: Union[str, TimeInterval] = DEFAULT_INTERVAL,
+                                 days_back: int = DEFAULT_DAYS_BACK,
+                                 start_date: Optional[str] = None,
+                                 end_date: Optional[str] = None) -> Optional[EventHistoricalData]:
+        """
+        Extract historical data for all markets in an event.
+        
+        Args:
+            event_slug: Event slug from URL
+            interval: Time interval for data points
+            days_back: Number of days of history (if start_date not provided)
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            
+        Returns:
+            EventHistoricalData object or None if extraction fails
+        """
+        try:
+            # Fetch the event
+            logger.info(f"Fetching event: {event_slug}")
+            event = self.api.get_event(event_slug)
+            
+            if not event:
+                logger.warning(f"Event not found: {event_slug}")
+                print(f"\nError: Event not found: {event_slug}")
+                return None
+            
+            if not event.markets:
+                logger.warning(f"No markets found in event: {event_slug}")
+                print(f"\nNo markets found in this event.")
+                return None
+            
+            # Display event information
+            print(f"\nEvent: {event.title}")
+            print(f"Markets to extract: {len(event.markets)}")
+            
+            # Calculate time range
+            if start_date:
+                start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp())
+            else:
+                start_ts = int(time.time()) - (days_back * 24 * 60 * 60)
+                
+            if end_date:
+                end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp())
+            else:
+                end_ts = int(time.time())
+            
+            # Create EventHistoricalData object
+            event_data = EventHistoricalData(event=event)
+            
+            # Extract data for each market
+            successful = 0
+            failed = 0
+            
+            for i, market in enumerate(event.markets, 1):
+                market_name = market.group_item_title or market.question[:50]
+                print(f"\n[{i}/{len(event.markets)}] Extracting: {market_name}...")
+                
+                try:
+                    # Fetch price history for this market
+                    price_histories = self.api.get_price_history(
+                        market, interval, start_ts, end_ts
+                    )
+                    
+                    if price_histories:
+                        # Create MarketHistoricalData
+                        market_data = MarketHistoricalData(
+                            market=market,
+                            price_histories=price_histories
+                        )
+                        event_data.market_data[market.slug] = market_data
+                        successful += 1
+                        
+                        # Show brief summary
+                        for outcome, history in price_histories.items():
+                            if history.price_points:
+                                print(f"  {outcome}: {history.data_points_count} data points, "
+                                     f"latest: ${history.latest_price:.4f}")
+                    else:
+                        print(f"  Warning: No data available")
+                        failed += 1
+                        
+                except Exception as e:
+                    logger.error(f"Failed to extract market {market.slug}: {e}")
+                    print(f"  Error: {e}")
+                    failed += 1
+                
+                # Rate limiting - small delay between markets
+                if i < len(event.markets):
+                    time.sleep(0.5)  # 500ms delay
+            
+            print(f"\n\nExtraction complete: {successful} succeeded, {failed} failed")
+            
+            if event_data.has_data:
+                return event_data
+            else:
+                print("\nNo data was successfully extracted.")
+                return None
+                
+        except Exception as e:
+            logger.exception("Failed to extract event markets")
+            print(f"\nError extracting event markets: {e}")
+            return None
+    
     def close(self):
         """Close API connections."""
         self.api.close()
@@ -270,6 +376,19 @@ Examples:
     )
     
     parser.add_argument(
+        "--extract-all-markets",
+        action="store_true",
+        help="Extract data for all markets in an event (only works with event URLs)"
+    )
+    
+    parser.add_argument(
+        "--column-format",
+        default="short",
+        choices=["short", "full", "descriptive"],
+        help="Column naming format for multi-market exports (default: short)"
+    )
+    
+    parser.add_argument(
         "--summary",
         action="store_true",
         help="Print summary report to console"
@@ -297,61 +416,118 @@ Examples:
     extractor = PolymarketExtractor(api_key=args.api_key)
     
     try:
-        # Extract data
-        data = extractor.extract_from_url(
-            args.url,
-            interval=args.interval,
-            days_back=args.days,
-            start_date=args.start,
-            end_date=args.end
-        )
-        
-        if not data:
-            logger.error("Failed to extract historical data")
-            return 1
+        # Check if we should extract all markets from an event
+        if args.extract_all_markets:
+            # Parse URL to get event slug
+            parsed_url = extractor.parser.parse(args.url)
             
-        if not data.has_data:
-            logger.warning("No historical price data available")
-            print("\nWarning: No historical price data available for this market")
-            return 1
+            if not extractor.parser.is_event_url(args.url):
+                print("\nError: --extract-all-markets can only be used with event URLs")
+                return 1
             
-        # Print summary if requested
-        if args.summary:
-            print("\n" + DataProcessor.create_summary_report(data))
-        
-        # Export data if output path provided
-        if args.output:
-            print(f"\nExporting data...")
+            event_slug = parsed_url['event_slug']
             
-            for format in args.formats:
-                try:
-                    # If output path doesn't start with / or contain /, prepend data/
-                    if not args.output.startswith('/') and '/' not in args.output:
-                        filepath = f"data/{args.output}.{format}"
-                    else:
-                        filepath = f"{args.output}.{format}"
-                    
-                    if format == "csv":
-                        DataProcessor.save_to_file(
-                            data, 
-                            filepath, 
-                            format=format,
-                            include_metadata=not args.no_metadata
-                        )
-                    else:
-                        DataProcessor.save_to_file(data, filepath, format=format)
+            # Extract all markets
+            event_data = extractor.extract_all_event_markets(
+                event_slug,
+                interval=args.interval,
+                days_back=args.days,
+                start_date=args.start,
+                end_date=args.end
+            )
+            
+            if not event_data:
+                logger.error("Failed to extract event data")
+                return 1
+                
+            if not event_data.has_data:
+                logger.warning("No historical price data available")
+                print("\nWarning: No historical price data available for any markets")
+                return 1
+            
+            # Export event data
+            if args.output:
+                print(f"\nExporting event data...")
+                
+                for format in args.formats:
+                    try:
+                        # If output path doesn't start with / or contain /, prepend data/
+                        if not args.output.startswith('/') and '/' not in args.output:
+                            filepath = f"data/{args.output}.{format}"
+                        else:
+                            filepath = f"{args.output}.{format}"
                         
-                    print(f"  ✓ Saved {format.upper()}: {filepath}")
-                    
-                except Exception as e:
-                    logger.error(f"Failed to save {format}: {e}")
-                    print(f"  ✗ Failed to save {format.upper()}: {e}")
-        else:
-            # If no output specified, print to console
-            if "json" in args.formats:
-                print("\n" + DataProcessor.to_json(data))
+                        DataProcessor.save_event_to_file(
+                            event_data,
+                            filepath,
+                            format=format,
+                            column_format=args.column_format
+                        )
+                        
+                        print(f"  ✓ Saved {format.upper()}: {filepath}")
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to save {format}: {e}")
+                        print(f"  ✗ Failed to save {format.upper()}: {e}")
             else:
-                print("\n" + DataProcessor.to_csv(data, include_metadata=not args.no_metadata))
+                print("\n✓ Extraction complete. Use -o to specify output path.")
+        
+        else:
+            # Single market extraction (original behavior)
+            data = extractor.extract_from_url(
+                args.url,
+                interval=args.interval,
+                days_back=args.days,
+                start_date=args.start,
+                end_date=args.end
+            )
+            
+            if not data:
+                logger.error("Failed to extract historical data")
+                return 1
+                
+            if not data.has_data:
+                logger.warning("No historical price data available")
+                print("\nWarning: No historical price data available for this market")
+                return 1
+                
+            # Print summary if requested
+            if args.summary:
+                print("\n" + DataProcessor.create_summary_report(data))
+            
+            # Export data if output path provided
+            if args.output:
+                print(f"\nExporting data...")
+                
+                for format in args.formats:
+                    try:
+                        # If output path doesn't start with / or contain /, prepend data/
+                        if not args.output.startswith('/') and '/' not in args.output:
+                            filepath = f"data/{args.output}.{format}"
+                        else:
+                            filepath = f"{args.output}.{format}"
+                        
+                        if format == "csv":
+                            DataProcessor.save_to_file(
+                                data, 
+                                filepath, 
+                                format=format,
+                                include_metadata=not args.no_metadata
+                            )
+                        else:
+                            DataProcessor.save_to_file(data, filepath, format=format)
+                            
+                        print(f"  ✓ Saved {format.upper()}: {filepath}")
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to save {format}: {e}")
+                        print(f"  ✗ Failed to save {format.upper()}: {e}")
+            else:
+                # If no output specified, print to console
+                if "json" in args.formats:
+                    print("\n" + DataProcessor.to_json(data))
+                else:
+                    print("\n" + DataProcessor.to_csv(data, include_metadata=not args.no_metadata))
                 
         return 0
         

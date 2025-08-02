@@ -31,6 +31,10 @@ polymarket-extract "https://polymarket.com/event/market-slug"
 polymarket-extract "URL" -i 1h -d 7  # 7 days of hourly data
 polymarket-extract "URL" --start 2024-01-01 --end 2024-01-31  # Date range
 polymarket-extract "URL" -o analysis -f csv json excel  # Multiple formats
+
+# NEW: Extract ALL markets from an event
+polymarket-extract "EVENT_URL" --extract-all-markets -o output_name -f csv
+polymarket-extract "EVENT_URL" --extract-all-markets --column-format short  # Compact column names
 ```
 
 ### Development Commands
@@ -121,6 +125,14 @@ export POLYMARKET_MAX_RETRIES="5"  # Increase for reliability
 2. Validate URL format
 3. Check if event or market URL
 4. Default to data/ directory output
+5. For event URLs: suggest --extract-all-markets flag
+
+### "Extract all markets from an event"
+1. Verify it's an event URL, not a market URL
+2. Use --extract-all-markets flag
+3. Choose appropriate column format (short for readability)
+4. Warn about extraction time for large events (20+ markets)
+5. Suggest appropriate time intervals (daily for long-term, hourly for short-term)
 
 ### "Why is data missing?"
 1. Check market age (new markets have limited history)
