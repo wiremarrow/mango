@@ -416,9 +416,44 @@ class CLOBAPIClient(BaseAPIClient):
             logger.error(f"Error fetching spread for token {token_id}: {e}")
             return None
     
+    def _get_single_price(self, token_id: str, side: str = 'mid') -> Optional[float]:
+        """
+        Get price for a single token.
+        
+        Args:
+            token_id: Token ID
+            side: Price side ('bid', 'ask', or 'mid')
+            
+        Returns:
+            Price as float or None if not available
+        """
+        endpoint = f'/{side}point' if side == 'mid' else f'/{side}'
+        params = {'token_id': token_id}
+        
+        try:
+            response = self._request_with_retry('GET', endpoint, params=params)
+            data = response.json()
+            
+            # Handle different response formats
+            if isinstance(data, dict):
+                if 'price' in data:
+                    return float(data['price'])
+                elif side in data:
+                    return float(data[side])
+                elif 'mid' in data:
+                    return float(data['mid'])
+            elif isinstance(data, (int, float, str)):
+                return float(data)
+                
+            logger.warning(f"Unexpected response format for {token_id}: {data}")
+            return None
+        except Exception as e:
+            logger.debug(f"Error fetching {side} price for {token_id}: {e}")
+            return None
+    
     def get_prices(self, token_ids: List[str], side: str = 'mid') -> Dict[str, float]:
         """
-        Get prices for multiple tokens.
+        Get prices for multiple tokens using individual requests.
         
         Args:
             token_ids: List of token IDs
@@ -427,23 +462,43 @@ class CLOBAPIClient(BaseAPIClient):
         Returns:
             Dict mapping token IDs to prices
         """
-        params = [('side', side)]
+        prices = {}
+        
         for token_id in token_ids:
-            params.append(('token_id', token_id))
-            
-        try:
-            response = self._request_with_retry('GET', '/prices', params=params)
-            data = response.json()
-            
-            result = {}
-            for item in data:
-                if 'token_id' in item and 'price' in item:
-                    result[item['token_id']] = float(item['price'])
+            try:
+                # Try to get price using the appropriate endpoint
+                price = self._get_single_price(token_id, side)
+                
+                if price is not None:
+                    prices[token_id] = price
+                else:
+                    # Fallback: try to get from order book
+                    logger.debug(f"Falling back to order book for {token_id}")
+                    order_book = self.get_order_book(token_id)
                     
-            return result
-        except Exception as e:
-            logger.error(f"Error fetching prices: {e}")
-            return {}
+                    if order_book:
+                        if side == 'bid' and order_book.get('bids'):
+                            prices[token_id] = float(order_book['bids'][0]['price'])
+                        elif side == 'ask' and order_book.get('asks'):
+                            prices[token_id] = float(order_book['asks'][0]['price'])
+                        elif side == 'mid':
+                            bids = order_book.get('bids', [])
+                            asks = order_book.get('asks', [])
+                            if bids and asks:
+                                bid_price = float(bids[0]['price'])
+                                ask_price = float(asks[0]['price'])
+                                prices[token_id] = (bid_price + ask_price) / 2
+                                
+            except Exception as e:
+                logger.error(f"Failed to get price for token {token_id}: {e}")
+                continue
+                
+            # Small delay to respect rate limits
+            if len(token_ids) > 1:
+                import time
+                time.sleep(0.1)  # 100ms delay between requests
+                
+        return prices
 
 
 class PolymarketAPI:

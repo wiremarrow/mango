@@ -177,6 +177,8 @@ export POLYMARKET_MAX_RETRIES="5"  # Increase for reliability
 
 ### API Limitations
 - CLOB API requires authentication for enhanced limits
+- CLOB API prices endpoint doesn't support multiple token_ids in one request
+- Individual price endpoints (/bid, /ask) may return 404 for low-liquidity markets
 - Gamma API may return stale data for inactive markets
 - Data API has no authentication but data may be delayed
 - Rate limits: 60 requests/minute (ENFORCE THIS)
@@ -199,6 +201,7 @@ export POLYMARKET_MAX_RETRIES="5"  # Increase for reliability
 - DO NOT mix synchronous and async code
 - DO NOT bypass the data/ directory convention
 - DO NOT confuse market slugs with token IDs
+- DO NOT try to fetch prices for multiple tokens in one API call
 
 ## DEBUGGING CHECKLIST
 

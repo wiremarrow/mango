@@ -283,10 +283,12 @@ The library uses multiple Polymarket APIs with intelligent fallback:
 - **Purpose**: Trading data and real-time market information
 - **Endpoints**: 
   - Order books (`/book`, `/books`)
-  - Current prices (`/prices`, `/midpoint`, `/spread`)
+  - Current prices (`/midpoint`, `/spread`) - Note: `/prices` requires individual requests
+  - Individual price endpoints (`/bid`, `/ask`) - May return 404 for low liquidity
   - Historical data (`/prices-history`)
   - Market discovery (`/markets`)
 - **Authentication**: Optional API key for enhanced limits
+- **Implementation Note**: Price fetching uses individual requests with fallback to order books
 
 ### 2. Gamma API (Metadata)
 - **Base URL**: `https://gamma-api.polymarket.com`
@@ -623,11 +625,19 @@ flake8 polymarket/
 
 ## Limitations
 
+### Data Limitations
 - Historical data availability depends on market age and activity
-- Rate limits may apply for high-frequency requests
 - Some older markets may not have complete historical data
 - Price data is limited to 4 decimal places precision
 - Maximum time range depends on selected interval
+- Order book depth varies by market liquidity
+
+### API Limitations
+- Rate limits: 60 requests per minute across all endpoints
+- CLOB API prices endpoint requires individual requests per token
+- Direct price endpoints (/bid, /ask) may return 404 for low-liquidity markets
+- The library automatically falls back to order book data when price endpoints fail
+- Small delays are added between multiple requests to respect rate limits
 
 ## Contributing
 
