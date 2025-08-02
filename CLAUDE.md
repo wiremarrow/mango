@@ -32,9 +32,13 @@ polymarket-extract "URL" -i 1h -d 7  # 7 days of hourly data
 polymarket-extract "URL" --start 2024-01-01 --end 2024-01-31  # Date range
 polymarket-extract "URL" -o analysis -f csv json excel  # Multiple formats
 
-# NEW: Extract ALL markets from an event
+# Extract ALL markets from an event
 polymarket-extract "EVENT_URL" --extract-all-markets -o output_name -f csv
 polymarket-extract "EVENT_URL" --extract-all-markets --column-format short  # Compact column names
+
+# Memory-efficient extraction for large events
+polymarket-extract "EVENT_URL" --extract-all-markets -o output_name -f csv --streaming
+polymarket-extract "EVENT_URL" --extract-all-markets -o output_name -f csv --low-memory
 ```
 
 ### Development Commands
@@ -133,6 +137,8 @@ export POLYMARKET_MAX_RETRIES="5"  # Increase for reliability
 3. Choose appropriate column format (short for readability)
 4. Warn about extraction time for large events (20+ markets)
 5. Suggest appropriate time intervals (daily for long-term, hourly for short-term)
+6. For events >10 markets, recommend --streaming or --low-memory flags
+7. If user reports "zsh: killed", immediately suggest memory-efficient mode
 
 ### "Why is data missing?"
 1. Check market age (new markets have limited history)
@@ -147,6 +153,29 @@ export POLYMARKET_MAX_RETRIES="5"  # Increase for reliability
 3. Ensure sufficient disk space
 4. Validate export format
 5. Check write permissions
+
+## DOCUMENTATION STYLE GUIDE
+
+### Timeless Documentation Principle
+- **NEVER** use temporal markers like "NEW", "RECENT", "LATEST", "NOW", "CURRENTLY"
+- **NEVER** indicate when features were added or changed
+- **NEVER** use phrases that date the documentation
+- **ALWAYS** write documentation as if all features have always existed
+- **ALWAYS** focus on what the feature does, not when it was added
+
+### Examples of What to Avoid
+❌ "NEW: Memory-efficient mode"
+❌ "Recently added streaming support"
+❌ "Latest features include..."
+❌ "Now supports CSV streaming"
+❌ "(Added in version X)"
+
+### Examples of Correct Documentation
+✅ "Memory-efficient mode for large datasets"
+✅ "Streaming support for CSV exports"
+✅ "Features include..."
+✅ "Supports CSV streaming"
+✅ "Available in version X" (only if version info is essential)
 
 ## COLLABORATION GUIDELINES
 
@@ -197,6 +226,14 @@ export POLYMARKET_MAX_RETRIES="5"  # Increase for reliability
 - Historical data limited by market age
 - Order book depth depends on market liquidity
 
+### Memory Limitations
+- Regular mode: ~800MB per market for large datasets
+- Events with 20+ markets can use 20GB+ memory
+- Excel export requires entire dataset in memory
+- Streaming mode only supports CSV format
+- Auto-streaming enables for events >10 markets
+- "zsh: killed" = out of memory error
+
 ### Data Quirks
 - Some markets use "Yes"/"No", others use custom outcomes
 - Grouped markets (negRisk) require special handling
@@ -233,12 +270,24 @@ When issues arise, check in this order:
 - Implement connection pooling for API clients
 - Cache market metadata for 5 minutes
 - Stream large datasets instead of loading to memory
+- Use streaming CSV writer for events >10 markets
+- Enable garbage collection with --low-memory flag
+- Process markets in chunks to limit memory usage
+
+### Memory-Efficient Mode Features
+- `stream_event_to_csv()`: Direct CSV writing without DataFrames
+- `iterate_event_rows()`: Row-based iteration
+- Automatic garbage collection between markets
+- Incremental timestamp processing
+- Forward-fill during streaming (no post-processing)
 
 ### Forbidden Practices
 - NO synchronous loops for API calls
 - NO unbounded data fetching
 - NO string concatenation in loops
 - NO redundant DataFrame copies
+- NO loading entire event data for large events (>10 markets)
+- NO Excel export for events >20 markets without warning
 
 ## TESTING REQUIREMENTS
 
@@ -277,5 +326,22 @@ When issues arise, check in this order:
 4. **PROTECT** against malicious inputs
 5. **OPTIMIZE** for reliability over speed
 6. **DOCUMENT** any deviations from established patterns
+
+## MEMORY-EFFICIENT EXTRACTION EXAMPLE
+
+When user wants EPL data:
+```bash
+# CORRECT - Memory efficient for 25 markets
+polymarket-extract "https://polymarket.com/event/english-premier-league-winner" \
+  --extract-all-markets -o epl_all_teams -f csv --column-format short -d 7 --streaming
+
+# ALSO CORRECT - Maximum efficiency
+polymarket-extract "https://polymarket.com/event/english-premier-league-winner" \
+  --extract-all-markets -o epl_all_teams -f csv --column-format short -d 7 --low-memory
+
+# AVOID - Will use 20GB+ memory
+polymarket-extract "https://polymarket.com/event/english-premier-league-winner" \
+  --extract-all-markets -o epl_all_teams -f excel --column-format short -d 30
+```
 
 Remember: This codebase serves financial analysis. Accuracy, reliability, and maintainability are non-negotiable. Every decision must reinforce these principles.

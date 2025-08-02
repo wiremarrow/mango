@@ -10,6 +10,7 @@ import argparse
 import sys
 import logging
 import time
+import gc
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Union
@@ -198,7 +199,9 @@ class PolymarketExtractor:
                                  interval: Union[str, TimeInterval] = DEFAULT_INTERVAL,
                                  days_back: int = DEFAULT_DAYS_BACK,
                                  start_date: Optional[str] = None,
-                                 end_date: Optional[str] = None) -> Optional[EventHistoricalData]:
+                                 end_date: Optional[str] = None,
+                                 chunk_size: Optional[int] = None,
+                                 enable_gc: bool = False) -> Optional[EventHistoricalData]:
         """
         Extract historical data for all markets in an event.
         
@@ -208,6 +211,8 @@ class PolymarketExtractor:
             days_back: Number of days of history (if start_date not provided)
             start_date: Start date in YYYY-MM-DD format
             end_date: End date in YYYY-MM-DD format
+            chunk_size: Process markets in chunks (None = process all at once)
+            enable_gc: Enable garbage collection between markets
             
         Returns:
             EventHistoricalData object or None if extraction fails
@@ -281,6 +286,11 @@ class PolymarketExtractor:
                     logger.error(f"Failed to extract market {market.slug}: {e}")
                     print(f"  Error: {e}")
                     failed += 1
+                
+                # Memory management and rate limiting
+                if enable_gc:
+                    gc.collect()
+                    logger.debug(f"Garbage collection after market {i}/{len(event.markets)}")
                 
                 # Rate limiting - small delay between markets
                 if i < len(event.markets):
@@ -389,6 +399,25 @@ Examples:
     )
     
     parser.add_argument(
+        "--streaming",
+        action="store_true",
+        help="Use memory-efficient streaming mode for CSV exports (auto-enabled for large events)"
+    )
+    
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=5,
+        help="Number of markets to process at a time in chunk mode (default: 5)"
+    )
+    
+    parser.add_argument(
+        "--low-memory",
+        action="store_true",
+        help="Enable all memory optimizations (implies --streaming)"
+    )
+    
+    parser.add_argument(
         "--summary",
         action="store_true",
         help="Print summary report to console"
@@ -427,13 +456,26 @@ Examples:
             
             event_slug = parsed_url['event_slug']
             
+            # Check if we should auto-enable streaming for large events
+            event = extractor.api.get_event(event_slug)
+            auto_streaming = event and len(event.markets) > 10 and not args.streaming
+            
+            if auto_streaming:
+                print(f"\n⚡ Auto-enabling streaming mode for {len(event.markets)} markets")
+            
+            # Enable optimizations if requested
+            enable_gc = args.low_memory
+            use_streaming = args.streaming or args.low_memory or auto_streaming
+            
             # Extract all markets
             event_data = extractor.extract_all_event_markets(
                 event_slug,
                 interval=args.interval,
                 days_back=args.days,
                 start_date=args.start,
-                end_date=args.end
+                end_date=args.end,
+                chunk_size=args.chunk_size if args.low_memory else None,
+                enable_gc=enable_gc
             )
             
             if not event_data:

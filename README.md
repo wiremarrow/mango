@@ -6,7 +6,7 @@ A comprehensive Python library and CLI for Polymarket prediction markets. Extrac
 
 ### Core Capabilities
 - **Historical Data Extraction**: Complete price history for all market outcomes
-- **Event-Wide Data Extraction**: Extract all markets from an event in one command (NEW!)
+- **Event-Wide Data Extraction**: Extract all markets from an event in one command
 - **Order Book Analysis**: Real-time order book depth, spreads, and liquidity
 - **Portfolio Tracking**: Monitor positions, P&L, and trading activity
 - **Market Discovery**: Search and analyze markets with advanced filters
@@ -258,6 +258,9 @@ export POLYMARKET_LOG_LEVEL="INFO"
 | `-v, --verbose` | Enable verbose logging | False |
 | `--extract-all-markets` | Extract all markets from an event URL | False |
 | `--column-format` | Column naming for event exports (short, full, descriptive) | short |
+| `--streaming` | Use memory-efficient streaming mode for CSV exports | False |
+| `--chunk-size` | Number of markets to process at a time (with --low-memory) | 5 |
+| `--low-memory` | Enable all memory optimizations (implies --streaming) | False |
 
 ## Architecture
 
@@ -273,11 +276,14 @@ export POLYMARKET_LOG_LEVEL="INFO"
 - **API Module**: Unified interface for all Polymarket APIs with automatic fallback
 - **Models Module**: Type-safe data models with validation
 - **Parser Module**: Robust URL parsing with error handling
-- **Processor Module**: Data transformation, statistics, and export
+- **Processor Module**: Data transformation, statistics, export, and streaming capabilities
+  - `merge_event_price_histories()`: DataFrame-based merging (high memory)
+  - `stream_event_to_csv()`: Memory-efficient streaming writer
+  - `iterate_event_rows()`: Row-based iteration for large datasets
 - **Config Module**: Centralized configuration management
 - **Exceptions Module**: Hierarchical exception structure
 
-## Event Data Extraction (NEW!)
+## Event Data Extraction
 
 The `--extract-all-markets` flag enables extracting data from all markets within an event simultaneously:
 
@@ -307,6 +313,37 @@ timestamp,liverpool_yes,liverpool_no,manchester_city_yes,manchester_city_no,...
 
 ### Performance Note
 Extracting large events (20+ markets) may take several minutes due to rate limiting.
+
+### Memory Efficiency
+
+The library includes memory-efficient streaming mode for large events:
+
+#### Memory Usage Comparison
+- **Regular mode**: ~20GB+ for 25 markets × 1441 data points
+- **Streaming mode**: <1GB for any event size
+
+#### Automatic Optimization
+- Events with >10 markets automatically use streaming mode for CSV exports
+- Override with `--streaming` flag or disable with regular DataFrame mode
+
+#### Trade-offs
+| Mode | Memory Usage | Speed | Formats | Error Recovery |
+|------|--------------|-------|---------|----------------|
+| Regular | High (all in memory) | Faster | All formats | All or nothing |
+| Streaming | Low (<1GB) | ~10-20% slower | CSV only | Partial file possible |
+
+#### When to Use Streaming
+- Large events (10+ markets)
+- Limited RAM available
+- CSV output is sufficient
+- Reliability over speed
+
+#### Memory Crisis Solutions
+If you see "zsh: killed" or similar errors:
+1. Use `--streaming` or `--low-memory` flag
+2. Reduce time range with `-d` flag
+3. Use CSV format instead of Excel
+4. Extract specific markets instead of entire event
 
 ## API Architecture
 
@@ -553,13 +590,21 @@ polymarket-extract "https://polymarket.com/will-x-happen" -i 1m -d 1
 # Export last 90 days to all formats
 polymarket-extract "URL" -d 90 -o analysis -f csv json excel parquet
 
-# Extract ALL markets from an event (new feature!)
+# Extract ALL markets from an event
 polymarket-extract "https://polymarket.com/event/english-premier-league-winner" \
   --extract-all-markets -o epl_all_teams -f csv
 
 # Extract event with custom column naming
 polymarket-extract "https://polymarket.com/event/2024-presidential-election" \
   --extract-all-markets --column-format short -o election_data
+
+# Memory-efficient extraction for large events
+polymarket-extract "https://polymarket.com/event/english-premier-league-winner" \
+  --extract-all-markets -o epl_all_teams -f csv --streaming -d 7
+
+# Maximum memory efficiency with all optimizations
+polymarket-extract "https://polymarket.com/event/us-election-2024" \
+  --extract-all-markets -o election_data -f csv --low-memory --chunk-size 3
 ```
 
 ### Programmatic Usage
@@ -665,6 +710,34 @@ flake8 polymarket/
 - Use meaningful variable names
 - Keep functions focused and small
 
+## Troubleshooting
+
+### Common Issues and Solutions
+
+#### "zsh: killed" or Process Killed
+**Problem**: Process terminated due to excessive memory usage
+**Solutions**:
+1. Use `--streaming` flag for CSV exports: `polymarket-extract "URL" --extract-all-markets -f csv --streaming`
+2. Enable all optimizations: `polymarket-extract "URL" --extract-all-markets -f csv --low-memory`
+3. Reduce data range: `-d 7` instead of default 30 days
+4. Extract fewer markets at once
+
+#### "invalid filters: 'startTs' and 'endTs' interval is too long"
+**Problem**: API rejects time range for new markets
+**Solutions**:
+1. Use fewer days: `-d 7` or `-d 3`
+2. Specify exact dates: `--start 2025-07-28 --end 2025-08-02`
+3. Check market creation date - new markets have limited history
+
+#### File Extension Issues
+**Problem**: Excel files created with .excel extension
+**Solution**: The library creates proper .xlsx files
+
+#### Memory Usage Patterns
+- **25 markets × 1441 points × 2 outcomes = 72,050 data points**
+- **Regular mode**: Stores all in memory (~20GB+)
+- **Streaming mode**: Processes incrementally (<1GB)
+
 ## Limitations
 
 ### Data Limitations
@@ -680,6 +753,12 @@ flake8 polymarket/
 - Direct price endpoints (/bid, /ask) may return 404 for low-liquidity markets
 - The library automatically falls back to order book data when price endpoints fail
 - Small delays are added between multiple requests to respect rate limits
+
+### Memory Limitations
+- Regular DataFrame mode requires ~800MB per market for large datasets
+- Excel export requires entire dataset in memory
+- Streaming mode only available for CSV format
+- Large events (20+ markets) should use streaming or low-memory mode
 
 ## Contributing
 

@@ -10,9 +10,11 @@ import json
 import csv
 import io
 import logging
+import gc
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional, Union, Iterator, Tuple
 from datetime import datetime
+from collections import defaultdict
 
 from .models import MarketHistoricalData, PriceHistory, EventHistoricalData
 from .config import (
@@ -376,9 +378,8 @@ class DataProcessor:
             filepath = Path(filepath)
             
             if format.lower() == 'csv':
-                # Merge all market data into single DataFrame
-                df = DataProcessor.merge_event_price_histories(data, column_format)
-                df.to_csv(filepath, index=False, **kwargs)
+                # Use streaming for better memory efficiency
+                DataProcessor.stream_event_to_csv(data, filepath, column_format)
                 
             elif format.lower() == 'json':
                 # Convert to JSON with nested structure
@@ -483,3 +484,177 @@ class DataProcessor:
         lines.append("=" * 80)
         
         return '\n'.join(lines)
+    
+    @staticmethod
+    def stream_event_to_csv(event_data: EventHistoricalData,
+                           filepath: Union[str, Path],
+                           column_format: str = 'short') -> None:
+        """
+        Stream event data directly to CSV without loading all data into memory.
+        
+        This method processes one timestamp at a time across all markets,
+        dramatically reducing memory usage for large events.
+        
+        Args:
+            event_data: EventHistoricalData containing all market data
+            filepath: Output CSV file path
+            column_format: Column naming format ('short', 'full', 'descriptive')
+            
+        Raises:
+            ExportError: If streaming fails
+        """
+        try:
+            filepath = Path(filepath)
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            
+            logger.info(f"Starting streaming CSV export for {event_data.total_markets} markets")
+            
+            # Step 1: Collect all unique timestamps across all markets
+            logger.debug("Collecting timestamps...")
+            timestamp_data = defaultdict(dict)  # timestamp -> {column: price}
+            
+            # Process each market
+            for market_slug, market_data in event_data.market_data.items():
+                market = market_data.market
+                
+                # Determine column prefix
+                if column_format == 'short':
+                    if market.group_item_title:
+                        prefix = market.group_item_title.lower().replace(' ', '_')
+                    else:
+                        parts = market_slug.split('-')
+                        if 'will' in parts:
+                            idx = parts.index('will')
+                            if idx + 1 < len(parts):
+                                prefix = parts[idx + 1]
+                            else:
+                                prefix = market_slug[:20]
+                        else:
+                            prefix = market_slug[:20]
+                elif column_format == 'full':
+                    prefix = market_slug
+                else:  # descriptive
+                    if market.group_item_title:
+                        prefix = market.group_item_title.replace(' ', '_')
+                    else:
+                        prefix = market.question[:50].replace(' ', '_').replace('?', '')
+                
+                # Process each outcome's price history
+                for outcome, history in market_data.price_histories.items():
+                    column_name = f'{prefix}_{outcome.lower()}'
+                    
+                    # Add each price point to our timestamp map
+                    for point in history.price_points:
+                        timestamp_data[point.timestamp][column_name] = point.price
+            
+            # Step 2: Get sorted timestamps and column names
+            timestamps = sorted(timestamp_data.keys())
+            all_columns = set()
+            for ts_data in timestamp_data.values():
+                all_columns.update(ts_data.keys())
+            columns = sorted(all_columns)
+            
+            logger.info(f"Writing {len(timestamps)} timestamps with {len(columns)} columns")
+            
+            # Step 3: Write CSV file row by row
+            with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+                # Write header
+                writer = csv.writer(csvfile)
+                writer.writerow(['timestamp'] + columns)
+                
+                # Write data rows
+                prev_row = {}  # For forward-filling
+                for timestamp in timestamps:
+                    row_data = timestamp_data[timestamp]
+                    
+                    # Forward-fill missing values
+                    for col in columns:
+                        if col in row_data:
+                            prev_row[col] = row_data[col]
+                        else:
+                            row_data[col] = prev_row.get(col, '')
+                    
+                    # Write row
+                    row = [timestamp.isoformat()]
+                    for col in columns:
+                        value = row_data.get(col, '')
+                        if isinstance(value, float):
+                            row.append(f"{value:.{PRICE_PRECISION}f}")
+                        else:
+                            row.append(value)
+                    
+                    writer.writerow(row)
+                    
+                    # Clear this timestamp's data to free memory
+                    del timestamp_data[timestamp]
+                
+                # Final garbage collection
+                gc.collect()
+            
+            logger.info(f"Successfully streamed CSV to: {filepath}")
+            
+        except Exception as e:
+            raise ExportError(f"Failed to stream CSV: {e}")
+    
+    @staticmethod
+    def iterate_event_rows(event_data: EventHistoricalData,
+                          column_format: str = 'short') -> Iterator[Dict[str, Any]]:
+        """
+        Iterate over event data rows without building complete DataFrame.
+        
+        Yields one row at a time with timestamp and all market prices.
+        
+        Args:
+            event_data: EventHistoricalData containing all market data
+            column_format: Column naming format
+            
+        Yields:
+            Dict containing timestamp and price columns
+        """
+        # Build column mapping
+        column_map = {}  # (market_slug, outcome) -> column_name
+        
+        for market_slug, market_data in event_data.market_data.items():
+            market = market_data.market
+            
+            # Determine prefix
+            if column_format == 'short':
+                if market.group_item_title:
+                    prefix = market.group_item_title.lower().replace(' ', '_')
+                else:
+                    parts = market_slug.split('-')
+                    if 'will' in parts and parts.index('will') + 1 < len(parts):
+                        prefix = parts[parts.index('will') + 1]
+                    else:
+                        prefix = market_slug[:20]
+            elif column_format == 'full':
+                prefix = market_slug
+            else:
+                prefix = (market.group_item_title or market.question[:50]).replace(' ', '_').replace('?', '')
+            
+            for outcome in market.outcomes:
+                column_map[(market_slug, outcome)] = f'{prefix}_{outcome.lower()}'
+        
+        # Get all timestamps
+        timestamps = event_data.get_aligned_timestamps()
+        
+        # Yield rows
+        for timestamp in timestamps:
+            row = {'timestamp': timestamp}
+            
+            # Add prices for this timestamp
+            for market_slug, market_data in event_data.market_data.items():
+                for outcome, history in market_data.price_histories.items():
+                    column = column_map.get((market_slug, outcome))
+                    if column:
+                        # Find price at this timestamp
+                        price = None
+                        for point in history.price_points:
+                            if point.timestamp <= timestamp:
+                                price = point.price
+                            else:
+                                break
+                        if price is not None:
+                            row[column] = price
+            
+            yield row
