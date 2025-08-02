@@ -451,11 +451,14 @@ Examples:
                 
                 for format in args.formats:
                     try:
+                        # Map format to proper file extension
+                        file_ext = 'xlsx' if format == 'excel' else format
+                        
                         # If output path doesn't start with / or contain /, prepend data/
                         if not args.output.startswith('/') and '/' not in args.output:
-                            filepath = f"data/{args.output}.{format}"
+                            filepath = f"data/{args.output}.{file_ext}"
                         else:
-                            filepath = f"{args.output}.{format}"
+                            filepath = f"{args.output}.{file_ext}"
                         
                         DataProcessor.save_event_to_file(
                             event_data,
@@ -501,11 +504,14 @@ Examples:
                 
                 for format in args.formats:
                     try:
+                        # Map format to proper file extension
+                        file_ext = 'xlsx' if format == 'excel' else format
+                        
                         # If output path doesn't start with / or contain /, prepend data/
                         if not args.output.startswith('/') and '/' not in args.output:
-                            filepath = f"data/{args.output}.{format}"
+                            filepath = f"data/{args.output}.{file_ext}"
                         else:
-                            filepath = f"{args.output}.{format}"
+                            filepath = f"{args.output}.{file_ext}"
                         
                         if format == "csv":
                             DataProcessor.save_to_file(
