@@ -754,9 +754,19 @@ flake8 polymarket/
 #### "invalid filters: 'startTs' and 'endTs' interval is too long"
 **Problem**: API rejects time range for markets (especially resolved ones)
 **Solutions**:
-1. Use fewer days: `-d 7` or `-d 3`
-2. Specify exact dates: `--start 2025-07-28 --end 2025-08-02`
-3. Check market creation date - new markets have limited history
+1. The tool now automatically adjusts date ranges based on market age
+2. If errors persist, use `-i max` to get all available data
+3. For specific date ranges: `--start 2025-07-28 --end 2025-08-02`
+
+### Smart Date Detection
+
+The tool includes intelligent date range detection that automatically adjusts to market age:
+- **Automatic adjustment**: For markets younger than the requested date range, it uses the market creation date
+- **No more errors**: Prevents "interval too long" errors for new markets
+- **Transparent**: Logs when using adjusted date ranges
+- **Example**: Requesting 30 days for a 7-day-old market automatically fetches all 7 days
+
+Note: This feature works best when market metadata includes creation dates (from Gamma API)
 
 
 #### Memory Usage Patterns

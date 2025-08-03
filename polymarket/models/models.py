@@ -111,6 +111,7 @@ class Market:
     liquidity: float = 0.0
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
+    created_at: Optional[datetime] = None
     archived: bool = False
     enable_order_book: bool = True
     
@@ -136,6 +137,7 @@ class Market:
         # Parse dates
         start_date = None
         end_date = None
+        created_at = None
         if data.get('startDate'):
             try:
                 start_date = datetime.fromisoformat(data['startDate'].replace('Z', '+00:00'))
@@ -144,6 +146,11 @@ class Market:
         if data.get('endDate'):
             try:
                 end_date = datetime.fromisoformat(data['endDate'].replace('Z', '+00:00'))
+            except:
+                pass
+        if data.get('createdAt'):
+            try:
+                created_at = datetime.fromisoformat(data['createdAt'].replace('Z', '+00:00'))
             except:
                 pass
         
@@ -179,6 +186,7 @@ class Market:
             volume=float(data.get('volume', 0) or 0),
             start_date=start_date,
             end_date=end_date,
+            created_at=created_at,
             enable_order_book=data.get('enableOrderBook', True),
             neg_risk=data.get('negRisk', False),
             neg_risk_market_id=data.get('negRiskMarketID'),

@@ -323,12 +323,13 @@ class CLOBAPIClient(BaseAPIClient):
                                      outcomes: List[str],
                                      interval: Union[str, TimeInterval] = TimeInterval.ONE_DAY,
                                      start_ts: Optional[int] = None,
-                                     end_ts: Optional[int] = None) -> Dict[str, PriceHistory]:
+                                     end_ts: Optional[int] = None,
+                                     fidelity: Optional[int] = None) -> Dict[str, PriceHistory]:
         """Fetch price history for all outcomes of a market."""
         results = {}
         
         for token_id, outcome in zip(token_ids, outcomes):
-            history = self.get_price_history(token_id, interval, start_ts, end_ts)
+            history = self.get_price_history(token_id, interval, start_ts, end_ts, fidelity)
             if history:
                 history.outcome = outcome
                 results[outcome] = history
@@ -582,7 +583,8 @@ class PolymarketAPI:
                          market: Market,
                          interval: Union[str, TimeInterval] = TimeInterval.ONE_DAY,
                          start_ts: Optional[int] = None,
-                         end_ts: Optional[int] = None) -> Dict[str, PriceHistory]:
+                         end_ts: Optional[int] = None,
+                         fidelity: Optional[int] = None) -> Dict[str, PriceHistory]:
         """
         Get price history for all outcomes of a market.
         
@@ -600,7 +602,8 @@ class PolymarketAPI:
             market.outcomes,
             interval,
             start_ts,
-            end_ts
+            end_ts,
+            fidelity
         )
     
     def get_event(self, slug: str) -> Optional[Event]:

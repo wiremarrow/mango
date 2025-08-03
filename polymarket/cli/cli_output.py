@@ -71,6 +71,12 @@ class CLIReporter:
             self.print(f"Status: {status}")
         if market.volume:
             self.print(f"Volume: {format_volume(market.volume)}")
+        
+        # Display market age if available
+        if market.created_at:
+            from datetime import datetime
+            age_days = (datetime.now(market.created_at.tzinfo) - market.created_at).days
+            self.print(f"Market age: {age_days} days")
     
     def event_summary(self, event: Event) -> None:
         """Display event summary information."""

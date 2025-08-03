@@ -50,7 +50,7 @@ class PolymarketExtractor:
                         days_back: int = DEFAULT_DAYS_BACK,
                         start_date: Optional[str] = None,
                         end_date: Optional[str] = None,
-) -> Optional[MarketHistoricalData]:
+                        fidelity: Optional[int] = None) -> Optional[MarketHistoricalData]:
         """
         Extract historical data from a Polymarket URL.
         
@@ -86,12 +86,12 @@ class PolymarketExtractor:
             if not self._validate_market_tokens(market):
                 return None
             
-            # Calculate time range
-            start_ts, end_ts = self._calculate_time_range(start_date, end_date, days_back)
+            # Calculate time range with smart market age detection
+            start_ts, end_ts = self._calculate_time_range(start_date, end_date, days_back, market)
             
             # Fetch price history
             price_histories = self._fetch_price_history_with_retry(
-                market, interval, start_ts, end_ts
+                market, interval, start_ts, end_ts, fidelity
             )
             
             if not price_histories:
@@ -134,7 +134,8 @@ class PolymarketExtractor:
                                  days_back: int = DEFAULT_DAYS_BACK,
                                  start_date: Optional[str] = None,
                                  end_date: Optional[str] = None,
-                                 enable_gc: bool = False) -> Optional[EventHistoricalData]:
+                                 enable_gc: bool = False,
+                                 fidelity: Optional[int] = None) -> Optional[EventHistoricalData]:
         """
         Extract historical data for all markets in an event.
         
@@ -174,7 +175,8 @@ class PolymarketExtractor:
             # Extract data for each market
             successful, failed = self._extract_markets(
                 event.markets, event_data, interval, 
-                start_ts, end_ts, enable_gc
+                start_ts, end_ts, enable_gc, fidelity,
+                days_back, start_date, end_date
             )
             
             # Display final statistics
@@ -266,12 +268,27 @@ class PolymarketExtractor:
     
     def _calculate_time_range(self, start_date: Optional[str], 
                              end_date: Optional[str], 
-                             days_back: int) -> tuple:
-        """Calculate timestamp range for data extraction."""
+                             days_back: int,
+                             market: Optional['Market'] = None) -> tuple:
+        """Calculate timestamp range for data extraction with smart market age detection."""
+        # If explicit dates are provided, use them
         if start_date:
             start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp())
         else:
-            start_ts = int(time.time()) - (days_back * 24 * 60 * 60)
+            # Smart detection based on market age
+            if market and market.created_at:
+                market_age_days = (datetime.now(market.created_at.tzinfo) - market.created_at).days
+                
+                if market_age_days <= days_back:
+                    # Market is younger than requested range, use creation date
+                    start_ts = int(market.created_at.timestamp())
+                    logger.info(f"Market is {market_age_days} days old, using creation date as start")
+                else:
+                    # Market is older, use requested range
+                    start_ts = int(time.time()) - (days_back * 24 * 60 * 60)
+            else:
+                # Fallback to standard calculation
+                start_ts = int(time.time()) - (days_back * 24 * 60 * 60)
             
         if end_date:
             end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp())
@@ -281,7 +298,8 @@ class PolymarketExtractor:
         return start_ts, end_ts
     
     def _fetch_price_history_with_retry(self, market, interval: str, 
-                                      start_ts: int, end_ts: int):
+                                      start_ts: int, end_ts: int,
+                                      fidelity: Optional[int] = None):
         """Fetch price history with retry logic for API limits."""
         logger.info(f"Fetching price history (interval: {interval})...")
         self.reporter.print("\nFetching price history...")
@@ -293,7 +311,7 @@ class PolymarketExtractor:
         while retry_count < MAX_RETRIES:
             try:
                 price_histories = self.api.get_price_history(
-                    market, interval, current_start, current_end
+                    market, interval, current_start, current_end, fidelity
                 )
                 
                 if price_histories:
@@ -338,7 +356,10 @@ class PolymarketExtractor:
     
     def _extract_markets(self, markets: list, event_data: EventHistoricalData,
                         interval: str, start_ts: int, end_ts: int, 
-                        enable_gc: bool) -> tuple:
+                        enable_gc: bool, fidelity: Optional[int] = None,
+                        days_back: Optional[int] = None,
+                        start_date: Optional[str] = None,
+                        end_date: Optional[str] = None) -> tuple:
         """Extract price data for all markets in an event."""
         successful = 0
         failed = 0
@@ -357,9 +378,14 @@ class PolymarketExtractor:
                 continue
             
             try:
+                # Calculate time range specific to this market
+                market_start_ts, market_end_ts = self._calculate_time_range(
+                    start_date, end_date, days_back or DEFAULT_DAYS_BACK, market
+                )
+                
                 # Fetch price history for this market
                 price_histories = self._fetch_price_history_with_retry(
-                    market, interval, start_ts, end_ts
+                    market, interval, market_start_ts, market_end_ts, fidelity
                 )
                 
                 if price_histories:

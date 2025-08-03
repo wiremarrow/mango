@@ -81,6 +81,12 @@ Examples:
     )
     
     parser.add_argument(
+        "--fidelity",
+        type=int,
+        help="Resolution of data in minutes (e.g., 5 for 5-minute intervals, 60 for hourly)"
+    )
+    
+    parser.add_argument(
         "-o", "--output",
         help="Output file path (without extension)"
     )
@@ -153,7 +159,8 @@ Examples:
                 days_back=args.days,
                 start_date=args.start,
                 end_date=args.end,
-                enable_gc=use_streaming
+                enable_gc=use_streaming,
+                fidelity=args.fidelity
             )
             
             if not event_data:
@@ -198,7 +205,8 @@ Examples:
                 interval=args.interval,
                 days_back=args.days,
                 start_date=args.start,
-                end_date=args.end
+                end_date=args.end,
+                fidelity=args.fidelity
             )
             
             if not data:
