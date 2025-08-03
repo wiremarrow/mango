@@ -63,8 +63,11 @@ flake8 polymarket/
 
 #### Market Discovery
 ```bash
-# Search for markets
+# Search for markets with basic filters
 mango search "presidential election" --min-volume 10000
+
+# Advanced search with all filters
+mango search "bitcoin" --min-volume 50000 --max-liquidity 100000 --tag 5 --start-after 2025-01-01
 
 # Get detailed market information with order book
 mango market-info "will-trump-win-2024" --show-book --depth 20
@@ -74,6 +77,36 @@ mango book "will-trump-win-2024" --format json -o orderbook.json
 
 # Get current prices and spreads
 mango price "will-trump-win-2024"
+```
+
+#### Advanced Market Filtering
+```bash
+# Search by volume range
+mango markets-advanced --min-volume 1000000 --max-volume 5000000 --limit 20
+
+# Filter by multiple IDs
+mango markets-advanced --ids 123 456 789 --format json
+
+# Filter by liquidity and dates
+mango markets-advanced --min-liquidity 50000 --start-after 2025-01-01 --end-before 2025-12-31
+
+# Get only CLOB tradeable markets
+mango markets-advanced --clob-only --active --sort liquidity --ascending
+
+# Export filtered results to JSON
+mango markets-advanced --min-volume 100000 --tag 5 --format json -o high_volume_markets.json
+```
+
+#### Tag-Based Discovery
+```bash
+# Explore markets by tag
+mango tags 17 --limit 50
+
+# Find events with a specific tag
+mango tags 5 --type events --related
+
+# Include related tags in search
+mango tags 10 --related --limit 100
 ```
 
 #### Portfolio Management
@@ -264,6 +297,40 @@ export POLYMARKET_LOG_LEVEL="INFO"
 | `market-info` | Get detailed market information | `mango market-info "btc-50k-2024" --show-book` |
 | `book` | View order book depth | `mango book "btc-50k-2024" --depth 50` |
 | `price` | Get current prices and spreads | `mango price "btc-50k-2024"` |
+| `markets-advanced` | Advanced market search with all filters | `mango markets-advanced --min-volume 100000` |
+| `tags` | Explore markets/events by tag | `mango tags 17 --type markets` |
+
+### Search Command Options
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--limit` | Maximum results | `--limit 20` |
+| `--inactive` | Include inactive markets | `--inactive` |
+| `--archived` | Include archived markets | `--archived` |
+| `--min-volume` | Minimum volume filter | `--min-volume 50000` |
+| `--max-volume` | Maximum volume filter | `--max-volume 1000000` |
+| `--min-liquidity` | Minimum liquidity filter | `--min-liquidity 10000` |
+| `--max-liquidity` | Maximum liquidity filter | `--max-liquidity 500000` |
+| `--tag` | Filter by tag ID | `--tag 5` |
+| `--start-after` | Markets starting after date | `--start-after 2025-01-01` |
+| `--end-before` | Markets ending before date | `--end-before 2025-12-31` |
+
+### Markets-Advanced Command Options
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--ids` | Filter by market IDs | `--ids 123 456 789` |
+| `--slugs` | Filter by market slugs | `--slugs "btc-100k" "eth-5k"` |
+| `--condition-ids` | Filter by condition IDs | `--condition-ids "0x123..." "0x456..."` |
+| `--token-ids` | Filter by CLOB token IDs | `--token-ids "0xabc..." "0xdef..."` |
+| `--active` | Only active markets | `--active` |
+| `--closed` | Only closed markets | `--closed` |
+| `--archived` | Only archived markets | `--archived` |
+| `--clob-only` | Only CLOB tradeable | `--clob-only` |
+| `--related-tags` | Include related tags | `--related-tags` |
+| `--sort` | Sort field | `--sort volume` |
+| `--ascending` | Sort ascending | `--ascending` |
+| `--format` | Output format | `--format json` |
 
 ### Portfolio Commands
 

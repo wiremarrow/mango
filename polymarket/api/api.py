@@ -117,20 +117,114 @@ class GammaAPIClient(BaseAPIClient):
                    offset: int = 0,
                    active: Optional[bool] = None,
                    closed: Optional[bool] = None,
+                   archived: Optional[bool] = None,
                    order: str = 'volume',
-                   ascending: bool = False) -> List[Market]:
-        """Fetch multiple markets with filtering options."""
-        params = {
-            'limit': limit,
-            'offset': offset,
-            'order': order,
-            'ascending': ascending
-        }
+                   ascending: bool = False,
+                   # Multiple value parameters
+                   id: Optional[List[int]] = None,
+                   slug: Optional[List[str]] = None,
+                   clob_token_ids: Optional[List[str]] = None,
+                   condition_ids: Optional[List[str]] = None,
+                   # Volume and liquidity filters
+                   liquidity_num_min: Optional[float] = None,
+                   liquidity_num_max: Optional[float] = None,
+                   volume_num_min: Optional[float] = None,
+                   volume_num_max: Optional[float] = None,
+                   # Date filters
+                   start_date_min: Optional[str] = None,
+                   start_date_max: Optional[str] = None,
+                   end_date_min: Optional[str] = None,
+                   end_date_max: Optional[str] = None,
+                   # Tag filters
+                   tag_id: Optional[int] = None,
+                   related_tags: Optional[bool] = None,
+                   enableOrderBook: Optional[bool] = None) -> List[Market]:
+        """
+        Fetch multiple markets with comprehensive filtering options.
         
+        Args:
+            limit: Maximum number of results (default: 100)
+            offset: Pagination offset (default: 0)
+            active: Filter by active status
+            closed: Filter by closed status
+            archived: Filter by archived status
+            order: Sort field (default: 'volume')
+            ascending: Sort direction (default: False)
+            id: List of specific market IDs to fetch
+            slug: List of specific market slugs to fetch
+            clob_token_ids: Filter by CLOB token IDs
+            condition_ids: Filter by condition IDs
+            liquidity_num_min: Minimum liquidity filter
+            liquidity_num_max: Maximum liquidity filter
+            volume_num_min: Minimum volume filter
+            volume_num_max: Maximum volume filter
+            start_date_min: Minimum start date (ISO format)
+            start_date_max: Maximum start date (ISO format)
+            end_date_min: Minimum end date (ISO format)
+            end_date_max: Maximum end date (ISO format)
+            tag_id: Filter by tag ID
+            related_tags: Include markets with related tags
+            enableOrderBook: Filter markets tradeable via CLOB
+            
+        Returns:
+            List of Market objects matching the filters
+        """
+        # Build base params
+        params = []
+        params.append(('limit', limit))
+        params.append(('offset', offset))
+        params.append(('order', order))
+        params.append(('ascending', ascending))
+        
+        # Add boolean filters
         if active is not None:
-            params['active'] = active
+            params.append(('active', active))
         if closed is not None:
-            params['closed'] = closed
+            params.append(('closed', closed))
+        if archived is not None:
+            params.append(('archived', archived))
+        if enableOrderBook is not None:
+            params.append(('enableOrderBook', enableOrderBook))
+        if related_tags is not None:
+            params.append(('related_tags', related_tags))
+            
+        # Add list parameters (multiple values)
+        if id:
+            for market_id in id:
+                params.append(('id', market_id))
+        if slug:
+            for market_slug in slug:
+                params.append(('slug', market_slug))
+        if clob_token_ids:
+            for token_id in clob_token_ids:
+                params.append(('clob_token_ids', token_id))
+        if condition_ids:
+            for condition_id in condition_ids:
+                params.append(('condition_ids', condition_id))
+                
+        # Add numeric filters
+        if liquidity_num_min is not None:
+            params.append(('liquidity_num_min', liquidity_num_min))
+        if liquidity_num_max is not None:
+            params.append(('liquidity_num_max', liquidity_num_max))
+        if volume_num_min is not None:
+            params.append(('volume_num_min', volume_num_min))
+        if volume_num_max is not None:
+            params.append(('volume_num_max', volume_num_max))
+            
+        # Add date filters
+        if start_date_min:
+            params.append(('start_date_min', start_date_min))
+        if start_date_max:
+            params.append(('start_date_max', start_date_max))
+        if end_date_min:
+            params.append(('end_date_min', end_date_min))
+        if end_date_max:
+            params.append(('end_date_max', end_date_max))
+            
+        # Add tag filter
+        if tag_id is not None:
+            params.append(('tag_id', tag_id))
             
         try:
             response = self._request_with_retry('GET', '/markets', params=params)
@@ -176,20 +270,108 @@ class GammaAPIClient(BaseAPIClient):
                   offset: int = 0,
                   active: Optional[bool] = None,
                   closed: Optional[bool] = None,
+                  archived: Optional[bool] = None,
                   order: str = 'volume',
-                  ascending: bool = False) -> List[Event]:
-        """Fetch multiple events with filtering options."""
-        params = {
-            'limit': limit,
-            'offset': offset,
-            'order': order,
-            'ascending': ascending
-        }
+                  ascending: bool = False,
+                  # Multiple value parameters
+                  id: Optional[List[int]] = None,
+                  slug: Optional[List[str]] = None,
+                  # Volume and liquidity filters
+                  liquidity_min: Optional[float] = None,
+                  liquidity_max: Optional[float] = None,
+                  volume_min: Optional[float] = None,
+                  volume_max: Optional[float] = None,
+                  # Date filters
+                  start_date_min: Optional[str] = None,
+                  start_date_max: Optional[str] = None,
+                  end_date_min: Optional[str] = None,
+                  end_date_max: Optional[str] = None,
+                  # Tag filters
+                  tag: Optional[str] = None,
+                  tag_id: Optional[int] = None,
+                  tag_slug: Optional[str] = None,
+                  related_tags: Optional[bool] = None) -> List[Event]:
+        """
+        Fetch multiple events with comprehensive filtering options.
         
+        Args:
+            limit: Maximum number of results (default: 100)
+            offset: Pagination offset (default: 0)
+            active: Filter by active status
+            closed: Filter by closed status
+            archived: Filter by archived status
+            order: Sort field (default: 'volume')
+            ascending: Sort direction (default: False)
+            id: List of specific event IDs to fetch
+            slug: List of specific event slugs to fetch
+            liquidity_min: Minimum liquidity filter
+            liquidity_max: Maximum liquidity filter
+            volume_min: Minimum volume filter
+            volume_max: Maximum volume filter
+            start_date_min: Minimum start date (ISO format)
+            start_date_max: Maximum start date (ISO format)
+            end_date_min: Minimum end date (ISO format)
+            end_date_max: Maximum end date (ISO format)
+            tag: Filter by tag label
+            tag_id: Filter by tag ID
+            tag_slug: Filter by tag slug
+            related_tags: Include events with related tags
+            
+        Returns:
+            List of Event objects matching the filters
+        """
+        # Build base params
+        params = []
+        params.append(('limit', limit))
+        params.append(('offset', offset))
+        params.append(('order', order))
+        params.append(('ascending', ascending))
+        
+        # Add boolean filters
         if active is not None:
-            params['active'] = active
+            params.append(('active', active))
         if closed is not None:
-            params['closed'] = closed
+            params.append(('closed', closed))
+        if archived is not None:
+            params.append(('archived', archived))
+        if related_tags is not None:
+            params.append(('related_tags', related_tags))
+            
+        # Add list parameters (multiple values)
+        if id:
+            for event_id in id:
+                params.append(('id', event_id))
+        if slug:
+            for event_slug in slug:
+                params.append(('slug', event_slug))
+                
+        # Add numeric filters
+        if liquidity_min is not None:
+            params.append(('liquidity_min', liquidity_min))
+        if liquidity_max is not None:
+            params.append(('liquidity_max', liquidity_max))
+        if volume_min is not None:
+            params.append(('volume_min', volume_min))
+        if volume_max is not None:
+            params.append(('volume_max', volume_max))
+            
+        # Add date filters
+        if start_date_min:
+            params.append(('start_date_min', start_date_min))
+        if start_date_max:
+            params.append(('start_date_max', start_date_max))
+        if end_date_min:
+            params.append(('end_date_min', end_date_min))
+        if end_date_max:
+            params.append(('end_date_max', end_date_max))
+            
+        # Add tag filters
+        if tag:
+            params.append(('tag', tag))
+        if tag_id is not None:
+            params.append(('tag_id', tag_id))
+        if tag_slug:
+            params.append(('tag_slug', tag_slug))
             
         try:
             response = self._request_with_retry('GET', '/events', params=params)
@@ -198,6 +380,74 @@ class GammaAPIClient(BaseAPIClient):
         except Exception as e:
             logger.error(f"Error fetching events: {e}")
             return []
+    
+    def get_markets_by_ids(self, market_ids: List[int]) -> List[Market]:
+        """
+        Get multiple markets by their IDs.
+        
+        Args:
+            market_ids: List of market IDs to fetch
+            
+        Returns:
+            List of Market objects
+        """
+        if not market_ids:
+            return []
+        return self.get_markets(id=market_ids, limit=len(market_ids))
+    
+    def get_markets_by_condition_ids(self, condition_ids: List[str]) -> List[Market]:
+        """
+        Get markets by their condition IDs.
+        
+        Args:
+            condition_ids: List of condition IDs to fetch
+            
+        Returns:
+            List of Market objects
+        """
+        if not condition_ids:
+            return []
+        return self.get_markets(condition_ids=condition_ids, limit=1000)
+    
+    def get_markets_by_tags(self, tag_id: int, include_related: bool = False) -> List[Market]:
+        """
+        Get markets by tag ID.
+        
+        Args:
+            tag_id: Tag ID to filter by
+            include_related: Whether to include markets with related tags
+            
+        Returns:
+            List of Market objects
+        """
+        return self.get_markets(tag_id=tag_id, related_tags=include_related, limit=1000)
+    
+    def get_events_by_ids(self, event_ids: List[int]) -> List[Event]:
+        """
+        Get multiple events by their IDs.
+        
+        Args:
+            event_ids: List of event IDs to fetch
+            
+        Returns:
+            List of Event objects
+        """
+        if not event_ids:
+            return []
+        return self.get_events(id=event_ids, limit=len(event_ids))
+    
+    def get_events_by_tags(self, tag_id: int, include_related: bool = False) -> List[Event]:
+        """
+        Get events by tag ID.
+        
+        Args:
+            tag_id: Tag ID to filter by
+            include_related: Whether to include events with related tags
+            
+        Returns:
+            List of Event objects
+        """
+        return self.get_events(tag_id=tag_id, related_tags=include_related, limit=1000)
 
 
 class CLOBAPIClient(BaseAPIClient):

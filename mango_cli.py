@@ -42,34 +42,69 @@ class MangoCLI:
         self.parser = PolymarketURLParser()
     
     def cmd_search(self, query: str, limit: int = 20, 
-                   active_only: bool = True, min_volume: float = 0) -> None:
-        """Search for markets by keyword."""
+                   active_only: bool = True, min_volume: float = 0,
+                   archived: bool = False, max_volume: Optional[float] = None,
+                   min_liquidity: Optional[float] = None, max_liquidity: Optional[float] = None,
+                   tag: Optional[int] = None, start_after: Optional[str] = None,
+                   end_before: Optional[str] = None) -> None:
+        """Search for markets by keyword with advanced filtering."""
         logger.info(f"Searching for markets: '{query}'")
-        markets = self.api.search_markets(query, limit)
         
-        if active_only:
-            markets = [m for m in markets if m.active]
-        if min_volume > 0:
-            markets = [m for m in markets if m.volume >= min_volume]
+        # Use Gamma API for advanced filtering
+        gamma_client = self.api.gamma_client
+        
+        # Convert date strings to ISO format if provided
+        start_date_min = None
+        end_date_max = None
+        if start_after:
+            start_date_min = f"{start_after}T00:00:00Z"
+        if end_before:
+            end_date_max = f"{end_before}T23:59:59Z"
+        
+        # Get markets with filters
+        all_markets = gamma_client.get_markets(
+            limit=1000,  # Get more to filter by query
+            active=not archived if active_only else None,
+            archived=archived,
+            volume_num_min=min_volume if min_volume > 0 else None,
+            volume_num_max=max_volume,
+            liquidity_num_min=min_liquidity,
+            liquidity_num_max=max_liquidity,
+            tag_id=tag,
+            start_date_min=start_date_min,
+            end_date_max=end_date_max
+        )
+        
+        # Filter by query text
+        query_lower = query.lower()
+        markets = []
+        for market in all_markets:
+            if (query_lower in market.question.lower() or 
+                query_lower in market.slug.lower()):
+                markets.append(market)
+                if len(markets) >= limit:
+                    break
         
         if not markets:
-            print(f"No markets found matching '{query}'")
+            print(f"No markets found matching '{query}' with the specified filters")
             return
         
         print(f"\nFound {len(markets)} markets:\n")
         
         table_data = []
         for i, market in enumerate(markets, 1):
+            status = "Archived" if market.archived else ("Active" if market.active else "Inactive")
             table_data.append([
                 i,
                 market.slug[:40] + "..." if len(market.slug) > 40 else market.slug,
                 market.question[:60] + "..." if len(market.question) > 60 else market.question,
                 f"${market.volume:,.0f}",
-                "Active" if market.active else "Inactive"
+                f"${market.liquidity:,.0f}",
+                status
             ])
         
         print(tabulate(table_data, 
-                      headers=["#", "Slug", "Question", "Volume", "Status"],
+                      headers=["#", "Slug", "Question", "Volume", "Liquidity", "Status"],
                       tablefmt="grid"))
     
     def cmd_market_info(self, slug: str, show_book: bool = False, 
@@ -376,6 +411,175 @@ class MangoCLI:
         """Close API connections."""
         self.api.close()
 
+    
+    def cmd_markets_advanced(self, **kwargs) -> None:
+        """Advanced market search with all filtering options."""
+        gamma_client = self.api.gamma_client
+        
+        # Convert date parameters to ISO format
+        date_params = {}
+        if kwargs.get('start_after'):
+            date_params['start_date_min'] = f"{kwargs['start_after']}T00:00:00Z"
+        if kwargs.get('start_before'):
+            date_params['start_date_max'] = f"{kwargs['start_before']}T23:59:59Z"
+        if kwargs.get('end_after'):
+            date_params['end_date_min'] = f"{kwargs['end_after']}T00:00:00Z"
+        if kwargs.get('end_before'):
+            date_params['end_date_max'] = f"{kwargs['end_before']}T23:59:59Z"
+        
+        # Build filter parameters
+        filter_params = {
+            'limit': kwargs.get('limit', 100),
+            'offset': kwargs.get('offset', 0),
+            'order': kwargs.get('sort', 'volume'),
+            'ascending': kwargs.get('ascending', False),
+        }
+        
+        # Add status filters (mutually exclusive)
+        if kwargs.get('active'):
+            filter_params['active'] = True
+        elif kwargs.get('closed'):
+            filter_params['closed'] = True
+        elif kwargs.get('archived'):
+            filter_params['archived'] = True
+        
+        # Add list parameters
+        if kwargs.get('ids'):
+            filter_params['id'] = kwargs['ids']
+        if kwargs.get('slugs'):
+            filter_params['slug'] = kwargs['slugs']
+        if kwargs.get('condition_ids'):
+            filter_params['condition_ids'] = kwargs['condition_ids']
+        if kwargs.get('token_ids'):
+            filter_params['clob_token_ids'] = kwargs['token_ids']
+        
+        # Add numeric filters
+        if kwargs.get('min_volume') is not None:
+            filter_params['volume_num_min'] = kwargs['min_volume']
+        if kwargs.get('max_volume') is not None:
+            filter_params['volume_num_max'] = kwargs['max_volume']
+        if kwargs.get('min_liquidity') is not None:
+            filter_params['liquidity_num_min'] = kwargs['min_liquidity']
+        if kwargs.get('max_liquidity') is not None:
+            filter_params['liquidity_num_max'] = kwargs['max_liquidity']
+        
+        # Add tag filters
+        if kwargs.get('tag') is not None:
+            filter_params['tag_id'] = kwargs['tag']
+        if kwargs.get('related_tags'):
+            filter_params['related_tags'] = True
+        if kwargs.get('clob_only'):
+            filter_params['enableOrderBook'] = True
+        
+        # Merge date parameters
+        filter_params.update(date_params)
+        
+        # Fetch markets
+        markets = gamma_client.get_markets(**filter_params)
+        
+        if not markets:
+            print("No markets found with the specified filters")
+            return
+        
+        print(f"\nFound {len(markets)} markets:\n")
+        
+        # Handle output format
+        if kwargs.get('format') == 'json':
+            import json
+            data = [{
+                'id': market.id,
+                'slug': market.slug,
+                'question': market.question,
+                'condition_id': market.condition_id,
+                'volume': market.volume,
+                'liquidity': market.liquidity,
+                'active': market.active,
+                'closed': market.closed,
+                'archived': market.archived,
+                'outcomes': market.outcomes,
+                'token_ids': market.token_ids,
+                'created_at': market.created_at.isoformat() if market.created_at else None,
+                'end_date': market.end_date.isoformat() if market.end_date else None
+            } for market in markets]
+            
+            if kwargs.get('output'):
+                with open(kwargs['output'], 'w') as f:
+                    json.dump(data, f, indent=2)
+                print(f"Saved {len(markets)} markets to {kwargs['output']}")
+            else:
+                print(json.dumps(data, indent=2))
+        else:
+            # Table format
+            table_data = []
+            for i, market in enumerate(markets, 1):
+                status = "Archived" if market.archived else ("Active" if market.active else "Inactive")
+                table_data.append([
+                    i,
+                    str(market.id) if market.id else "N/A",
+                    market.slug[:30] + "..." if len(market.slug) > 30 else market.slug,
+                    market.question[:40] + "..." if len(market.question) > 40 else market.question,
+                    f"${market.volume:,.0f}",
+                    f"${market.liquidity:,.0f}",
+                    status
+                ])
+            
+            print(tabulate(table_data, 
+                          headers=["#", "ID", "Slug", "Question", "Volume", "Liquidity", "Status"],
+                          tablefmt="grid"))
+    
+    def cmd_tags(self, tag_id: int, type: str = "markets", 
+                 related: bool = False, limit: int = 50) -> None:
+        """Explore markets or events by tag."""
+        gamma_client = self.api.gamma_client
+        
+        print(f"\nSearching for {type} with tag ID {tag_id}...\n")
+        
+        if type == "markets":
+            items = gamma_client.get_markets_by_tags(tag_id, include_related=related)[:limit]
+            
+            if not items:
+                print(f"No markets found with tag ID {tag_id}")
+                return
+            
+            print(f"Found {len(items)} markets:\n")
+            
+            table_data = []
+            for i, market in enumerate(items, 1):
+                table_data.append([
+                    i,
+                    market.slug[:40] + "..." if len(market.slug) > 40 else market.slug,
+                    market.question[:50] + "..." if len(market.question) > 50 else market.question,
+                    f"${market.volume:,.0f}",
+                    "Active" if market.active else "Inactive"
+                ])
+            
+            print(tabulate(table_data, 
+                          headers=["#", "Slug", "Question", "Volume", "Status"],
+                          tablefmt="grid"))
+        else:  # events
+            items = gamma_client.get_events_by_tags(tag_id, include_related=related)[:limit]
+            
+            if not items:
+                print(f"No events found with tag ID {tag_id}")
+                return
+            
+            print(f"Found {len(items)} events:\n")
+            
+            table_data = []
+            for i, event in enumerate(items, 1):
+                table_data.append([
+                    i,
+                    event.slug[:30] + "..." if len(event.slug) > 30 else event.slug,
+                    event.title[:40] + "..." if len(event.title) > 40 else event.title,
+                    len(event.markets),
+                    f"${event.volume:,.0f}",
+                    "Active" if event.active else "Inactive"
+                ])
+            
+            print(tabulate(table_data, 
+                          headers=["#", "Slug", "Title", "Markets", "Volume", "Status"],
+                          tablefmt="grid"))
+
 
 def create_parser():
     """Create argument parser for CLI commands."""
@@ -402,7 +606,14 @@ def create_parser():
     search_parser.add_argument("query", help="Search query")
     search_parser.add_argument("--limit", type=int, default=20, help="Max results")
     search_parser.add_argument("--inactive", action="store_true", help="Include inactive markets")
+    search_parser.add_argument("--archived", action="store_true", help="Include archived markets")
     search_parser.add_argument("--min-volume", type=float, default=0, help="Minimum volume filter")
+    search_parser.add_argument("--max-volume", type=float, help="Maximum volume filter")
+    search_parser.add_argument("--min-liquidity", type=float, help="Minimum liquidity filter")
+    search_parser.add_argument("--max-liquidity", type=float, help="Maximum liquidity filter")
+    search_parser.add_argument("--tag", type=int, help="Filter by tag ID")
+    search_parser.add_argument("--start-after", help="Markets starting after date (YYYY-MM-DD)")
+    search_parser.add_argument("--end-before", help="Markets ending before date (YYYY-MM-DD)")
     
     # Market info command
     info_parser = subparsers.add_parser("market-info", help="Get market details")
@@ -444,6 +655,44 @@ def create_parser():
     holders_parser.add_argument("--outcome", help="Filter by outcome")
     holders_parser.add_argument("--format", choices=["table", "json"], default="table")
     
+    # Advanced markets command
+    advanced_parser = subparsers.add_parser("markets-advanced", 
+                                           help="Advanced market search with all filters")
+    advanced_parser.add_argument("--ids", nargs="+", type=int, help="Specific market IDs")
+    advanced_parser.add_argument("--slugs", nargs="+", help="Specific market slugs")
+    advanced_parser.add_argument("--condition-ids", nargs="+", help="Filter by condition IDs")
+    advanced_parser.add_argument("--token-ids", nargs="+", help="Filter by CLOB token IDs")
+    advanced_parser.add_argument("--tag", type=int, help="Filter by tag ID")
+    advanced_parser.add_argument("--related-tags", action="store_true", help="Include related tags")
+    advanced_parser.add_argument("--min-volume", type=float, help="Minimum volume")
+    advanced_parser.add_argument("--max-volume", type=float, help="Maximum volume")
+    advanced_parser.add_argument("--min-liquidity", type=float, help="Minimum liquidity")
+    advanced_parser.add_argument("--max-liquidity", type=float, help="Maximum liquidity")
+    advanced_parser.add_argument("--start-after", help="Start date after (YYYY-MM-DD)")
+    advanced_parser.add_argument("--start-before", help="Start date before (YYYY-MM-DD)")
+    advanced_parser.add_argument("--end-after", help="End date after (YYYY-MM-DD)")
+    advanced_parser.add_argument("--end-before", help="End date before (YYYY-MM-DD)")
+    advanced_parser.add_argument("--active", action="store_true", help="Only active markets")
+    advanced_parser.add_argument("--closed", action="store_true", help="Only closed markets")
+    advanced_parser.add_argument("--archived", action="store_true", help="Only archived markets")
+    advanced_parser.add_argument("--clob-only", action="store_true", help="Only CLOB tradeable")
+    advanced_parser.add_argument("--limit", type=int, default=100, help="Max results")
+    advanced_parser.add_argument("--offset", type=int, default=0, help="Pagination offset")
+    advanced_parser.add_argument("--sort", default="volume", 
+                               choices=["volume", "liquidity", "created", "end_date"],
+                               help="Sort field")
+    advanced_parser.add_argument("--ascending", action="store_true", help="Sort ascending")
+    advanced_parser.add_argument("--format", choices=["table", "json"], default="table")
+    advanced_parser.add_argument("-o", "--output", help="Output file for JSON format")
+    
+    # Tags command
+    tags_parser = subparsers.add_parser("tags", help="Explore markets by tags")
+    tags_parser.add_argument("tag_id", type=int, help="Tag ID to explore")
+    tags_parser.add_argument("--type", choices=["markets", "events"], default="markets",
+                           help="Search markets or events")
+    tags_parser.add_argument("--related", action="store_true", help="Include related tags")
+    tags_parser.add_argument("--limit", type=int, default=50, help="Max results")
+    
     # Legacy extract command (for compatibility)
     extract_parser = subparsers.add_parser("extract", help="Extract historical data (legacy)")
     extract_parser.add_argument("url", help="Polymarket URL")
@@ -475,7 +724,10 @@ def main():
         # Execute command
         if args.command == "search":
             cli.cmd_search(args.query, args.limit, 
-                          not args.inactive, args.min_volume)
+                          not args.inactive, args.min_volume,
+                          args.archived, args.max_volume,
+                          args.min_liquidity, args.max_liquidity,
+                          args.tag, args.start_after, args.end_before)
         
         elif args.command == "market-info":
             cli.cmd_market_info(args.slug, args.show_book, args.depth)
@@ -495,6 +747,16 @@ def main():
         
         elif args.command == "holders":
             cli.cmd_holders(args.slug, args.top, args.outcome, args.format)
+        
+        elif args.command == "markets-advanced":
+            # Convert args namespace to dict for kwargs
+            kwargs = vars(args).copy()
+            kwargs.pop('command')  # Remove command from kwargs
+            kwargs.pop('api_key', None)  # Remove api_key from kwargs
+            cli.cmd_markets_advanced(**kwargs)
+        
+        elif args.command == "tags":
+            cli.cmd_tags(args.tag_id, args.type, args.related, args.limit)
         
         elif args.command == "extract":
             # Legacy support - redirect to polymarket_extract

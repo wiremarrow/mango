@@ -10,9 +10,20 @@ You are working with a professional-grade Python library for extracting historic
 ```bash
 # Market Discovery and Analysis
 mango search "keyword" --min-volume 10000  # Search markets
+mango search "bitcoin" --min-liquidity 50000 --tag 5  # Advanced search
 mango market-info "slug" --show-book  # Get market details with order book
 mango book "slug" --depth 50 --format json  # Export order book
 mango price "slug"  # Real-time prices and spreads
+
+# Advanced Market Filtering - ALL GAMMA API PARAMETERS
+mango markets-advanced --min-volume 100000 --max-volume 5000000  # Volume range
+mango markets-advanced --ids 123 456 --format json  # Multiple IDs
+mango markets-advanced --tag 5 --related-tags --clob-only  # Tag filtering
+mango markets-advanced --start-after 2025-01-01 --archived  # Date/status filters
+
+# Tag-Based Discovery
+mango tags 17 --limit 50  # Markets by tag
+mango tags 5 --type events --related  # Events with related tags
 
 # Portfolio Management
 mango portfolio 0xADDRESS --min-size 100  # View positions
