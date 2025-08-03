@@ -30,23 +30,13 @@ polymarket-extract "https://polymarket.com/event/market-slug"
 # Extract with specific parameters - USE THESE EXACT FLAGS
 polymarket-extract "URL" -i 1h -d 7  # 7 days of hourly data
 polymarket-extract "URL" --start 2024-01-01 --end 2024-01-31  # Date range
-polymarket-extract "URL" -o analysis -f csv json excel  # Multiple formats
+polymarket-extract "URL" -o analysis  # Export to CSV
 
 # Extract ALL markets from an event
-polymarket-extract "EVENT_URL" --extract-all-markets -o output_name -f csv
-polymarket-extract "EVENT_URL" --extract-all-markets --column-format short  # Compact column names
+polymarket-extract "EVENT_URL" --extract-all-markets -o output_name
 
 # Memory-efficient extraction for large events
-polymarket-extract "EVENT_URL" --extract-all-markets -o output_name -f csv --streaming
-polymarket-extract "EVENT_URL" --extract-all-markets -o output_name -f csv --low-memory
-
-# Automatic date detection for historical markets
-polymarket-extract "URL" --auto-dates
-polymarket-extract "EVENT_URL" --extract-all-markets --auto-dates --streaming
-
-# Extract all data from resolved markets using interval=max
-polymarket-extract "RESOLVED_MARKET_URL" --use-max-interval
-polymarket-extract "EVENT_URL" --extract-all-markets --use-max-interval --streaming
+polymarket-extract "EVENT_URL" --extract-all-markets -o output_name --streaming
 ```
 
 ### Development Commands
@@ -74,16 +64,20 @@ export POLYMARKET_MAX_RETRIES="5"  # Increase for reliability
 4. **NEVER** mix API responsibilities
 
 ### Module Boundaries - DO NOT VIOLATE
-- `api.py` - API communication and unified interface
-- `data_api.py` - Data API client for user/portfolio data
-- `orderbook.py` - Order book models and analysis ONLY
-- `models.py` - Core data structures ONLY  
-- `parser.py` - URL parsing ONLY
-- `processor.py` - Data manipulation and export ONLY
-- `config.py` - Configuration ONLY
-- `exceptions.py` - Error definitions ONLY
+- `api/api.py` - API communication and unified interface
+- `api/data_api.py` - Data API client for user/portfolio data
+- `models/orderbook.py` - Order book models and analysis ONLY
+- `models/models.py` - Core data structures ONLY  
+- `utils/parser.py` - URL parsing ONLY
+- `utils/processor.py` - Data manipulation and export ONLY
+- `utils/config.py` - Configuration ONLY
+- `utils/constants.py` - Magic numbers and constants ONLY
+- `utils/utils.py` - Shared utility functions ONLY
+- `utils/exceptions.py` - Error definitions ONLY
+- `cli/extractor.py` - Core extraction logic ONLY
+- `cli/cli_output.py` - CLI output handling ONLY
 - `mango_cli.py` - Enhanced CLI commands
-- `polymarket_extract.py` - Legacy data extraction
+- `polymarket_extract.py` - Original data extraction CLI
 
 ### Data Flow - FOLLOW STRICTLY
 1. Parse URL → Extract slug
@@ -95,7 +89,7 @@ export POLYMARKET_MAX_RETRIES="5"  # Increase for reliability
 ## CRITICAL IMPLEMENTATION RULES
 
 ### Error Handling
-- ALWAYS use custom exceptions from `exceptions.py`
+- ALWAYS use custom exceptions from `utils/exceptions.py`
 - NEVER catch generic Exception without re-raising
 - ALWAYS log errors before raising
 - IMPLEMENT retry logic for all API calls
@@ -142,11 +136,10 @@ export POLYMARKET_MAX_RETRIES="5"  # Increase for reliability
 ### "Extract all markets from an event"
 1. Verify it's an event URL, not a market URL
 2. Use --extract-all-markets flag
-3. Choose appropriate column format (short for readability)
-4. Warn about extraction time for large events (20+ markets)
-5. Suggest appropriate time intervals (daily for long-term, hourly for short-term)
-6. For events >10 markets, recommend --streaming or --low-memory flags
-7. If user reports "zsh: killed", immediately suggest memory-efficient mode
+3. Warn about extraction time for large events (20+ markets)
+4. Suggest appropriate time intervals (daily for long-term, hourly for short-term)
+5. For events >10 markets, recommend --streaming flag
+6. If user reports "zsh: killed", immediately suggest --streaming mode
 
 ### "Why is data missing?"
 1. Check market age (new markets have limited history)
@@ -222,6 +215,16 @@ export POLYMARKET_MAX_RETRIES="5"  # Increase for reliability
 - **SHARE** knowledge about best practices and patterns
 - **MAINTAIN** high standards for code review and implementation
 
+## REMOVED FEATURES - DO NOT IMPLEMENT
+
+The following features have been removed for simplicity and maintainability:
+- Multiple export formats (JSON, Excel, Parquet) - CSV only now
+- `--column-format` flag - Column naming is automatic
+- `--low-memory` flag - Use `--streaming` instead
+- `--auto-dates` flag - Manual date ranges only
+- `--use-max-interval` flag - Standard intervals only
+- `--chunk-size` parameter - Not implemented
+
 ## CRITICAL WARNINGS
 
 ### API Limitations
@@ -251,8 +254,7 @@ export POLYMARKET_MAX_RETRIES="5"  # Increase for reliability
 ### Memory Limitations
 - Regular mode: ~800MB per market for large datasets
 - Events with 20+ markets can use 20GB+ memory
-- Excel export requires entire dataset in memory
-- Streaming mode only supports CSV format
+- Streaming mode reduces memory usage to <1GB for any event size
 - Auto-streaming enables for events >10 markets
 - "zsh: killed" = out of memory error
 
@@ -293,8 +295,8 @@ When issues arise, check in this order:
 - Cache market metadata for 5 minutes
 - Stream large datasets instead of loading to memory
 - Use streaming CSV writer for events >10 markets
-- Enable garbage collection with --low-memory flag
-- Process markets in chunks to limit memory usage
+- Enable garbage collection with streaming mode
+- Process markets incrementally to limit memory usage
 
 ### Memory-Efficient Mode Features
 - `stream_event_to_csv()`: Direct CSV writing without DataFrames
@@ -309,7 +311,6 @@ When issues arise, check in this order:
 - NO string concatenation in loops
 - NO redundant DataFrame copies
 - NO loading entire event data for large events (>10 markets)
-- NO Excel export for events >20 markets without warning
 
 ## TESTING REQUIREMENTS
 
@@ -355,15 +356,11 @@ When user wants EPL data:
 ```bash
 # CORRECT - Memory efficient for 25 markets
 polymarket-extract "https://polymarket.com/event/english-premier-league-winner" \
-  --extract-all-markets -o epl_all_teams -f csv --column-format short -d 7 --streaming
+  --extract-all-markets -o epl_all_teams -d 7 --streaming
 
-# ALSO CORRECT - Maximum efficiency
+# AVOID - Will use 20GB+ memory without streaming
 polymarket-extract "https://polymarket.com/event/english-premier-league-winner" \
-  --extract-all-markets -o epl_all_teams -f csv --column-format short -d 7 --low-memory
-
-# AVOID - Will use 20GB+ memory
-polymarket-extract "https://polymarket.com/event/english-premier-league-winner" \
-  --extract-all-markets -o epl_all_teams -f excel --column-format short -d 30
+  --extract-all-markets -o epl_all_teams -d 30
 ```
 
 Remember: This codebase serves financial analysis. Accuracy, reliability, and maintainability are non-negotiable. Every decision must reinforce these principles.

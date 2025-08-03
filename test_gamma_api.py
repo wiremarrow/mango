@@ -4,7 +4,7 @@
 import sys
 sys.path.insert(0, '/Users/admin/code/mango')
 
-from polymarket.api import GammaAPIClient
+from polymarket.api.api import GammaAPIClient
 import json
 
 # Initialize Gamma client

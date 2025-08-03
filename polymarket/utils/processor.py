@@ -2,7 +2,8 @@
 Data processing module for Polymarket data.
 
 This module handles data formatting, aggregation, statistical analysis,
-and export functionality for market historical data.
+and CSV export functionality for market historical data. Includes both
+DataFrame-based processing and memory-efficient streaming for large datasets.
 """
 
 import pandas as pd
@@ -16,18 +17,19 @@ from datetime import datetime
 from collections import defaultdict
 from tabulate import tabulate
 
-from .models import MarketHistoricalData, PriceHistory, EventHistoricalData
+from ..models import MarketHistoricalData, PriceHistory, EventHistoricalData
 from .config import (
     MAX_CSV_SIZE_MB, PRICE_PRECISION
 )
 from .exceptions import ExportError, DataProcessingError
+from .utils import get_column_prefix
 
 
 logger = logging.getLogger(__name__)
 
 
 class DataProcessor:
-    """Processes and formats Polymarket historical data."""
+    """Processes and formats Polymarket historical data for CSV export."""
     
     @staticmethod
     def merge_price_histories(histories: Dict[str, PriceHistory]) -> pd.DataFrame:
@@ -99,22 +101,8 @@ class DataProcessor:
             for market_slug, market_data in event_data.market_data.items():
                 market = market_data.market
                 
-                # Determine column prefix using short format
-                # Use group item title if available, otherwise extract from slug
-                if market.group_item_title:
-                    prefix = market.group_item_title.lower().replace(' ', '_')
-                else:
-                    # Try to extract meaningful prefix from slug
-                    parts = market_slug.split('-')
-                    if 'will' in parts:
-                        # Extract the main subject after 'will'
-                        idx = parts.index('will')
-                        if idx + 1 < len(parts):
-                            prefix = parts[idx + 1]
-                        else:
-                            prefix = market_slug[:20]
-                    else:
-                        prefix = market_slug[:20]
+                # Determine column prefix using utility function
+                prefix = get_column_prefix(market, market_slug)
                 
                 # Create DataFrame for this market
                 for outcome, history in market_data.price_histories.items():
@@ -378,19 +366,8 @@ class DataProcessor:
             for market_slug, market_data in event_data.market_data.items():
                 market = market_data.market
                 
-                # Determine column prefix (always use short format)
-                if market.group_item_title:
-                    prefix = market.group_item_title.lower().replace(' ', '_')
-                else:
-                    parts = market_slug.split('-')
-                    if 'will' in parts:
-                        idx = parts.index('will')
-                        if idx + 1 < len(parts):
-                            prefix = parts[idx + 1]
-                        else:
-                            prefix = market_slug[:20]
-                    else:
-                        prefix = market_slug[:20]
+                # Determine column prefix using utility function
+                prefix = get_column_prefix(market, market_slug)
                 
                 # Process each outcome's price history
                 for outcome, history in market_data.price_histories.items():
@@ -465,11 +442,8 @@ class DataProcessor:
         for market_slug, market_data in event_data.market_data.items():
             market = market_data.market
             
-            # Determine column prefix (always use short format)
-            if market.group_item_title:
-                prefix = market.group_item_title.lower().replace(' ', '_')
-            else:
-                prefix = market_slug[:20]
+            # Determine column prefix using utility function
+            prefix = get_column_prefix(market, market_slug)
             
             # Process each outcome
             for outcome, history in market_data.price_histories.items():

@@ -18,7 +18,7 @@ A comprehensive Python library and CLI for Polymarket prediction markets. Extrac
 - **Robust Error Handling**: Retry logic, rate limiting, and clear error messages
 - **Type Safety**: Full type hints throughout the codebase
 - **Flexible Configuration**: Environment variables and settings management
-- **Professional CLI**: Rich command-line interface with multiple output formats
+- **Professional CLI**: Rich command-line interface with JSON output for structured data
 
 ## Installation
 
@@ -86,7 +86,7 @@ polymarket-extract "URL" --start 2024-01-01 --end 2024-01-31
 polymarket-extract "URL" -o market_data
 
 # Export to specific directory
-polymarket-extract "URL" -o /path/to/output -f csv
+polymarket-extract "URL" -o /path/to/output
 
 # With API key
 polymarket-extract "URL" --api-key YOUR_API_KEY
@@ -97,7 +97,7 @@ polymarket-extract "URL" --api-key YOUR_API_KEY
 ### Basic Market Data
 ```python
 from polymarket import PolymarketAPI, DataProcessor
-from polymarket.models import TimeInterval
+from polymarket.models.models import TimeInterval
 
 # Initialize API
 api = PolymarketAPI(api_key="optional_key")
@@ -161,14 +161,26 @@ holders = api.get_market_holders(
 mango/
 ├── polymarket/              # Main package
 │   ├── __init__.py         # Package initialization and exports
-│   ├── api.py              # API clients (CLOB, Gamma, unified interface)
-│   ├── data_api.py         # Data API client for positions and activity
-│   ├── orderbook.py        # Order book models and analysis
-│   ├── models.py           # Data models and type definitions
-│   ├── parser.py           # URL parsing and slug extraction
-│   ├── processor.py        # Data processing, statistics, and export
-│   ├── config.py           # Configuration and environment variables
-│   └── exceptions.py       # Custom exception hierarchy
+│   ├── api/                # API clients
+│   │   ├── __init__.py
+│   │   ├── api.py          # CLOB, Gamma, unified interface
+│   │   └── data_api.py     # Data API client for positions/activity
+│   ├── models/             # Data models
+│   │   ├── __init__.py
+│   │   ├── models.py       # Core data structures
+│   │   └── orderbook.py    # Order book models and analysis
+│   ├── utils/              # Utilities and helpers
+│   │   ├── __init__.py
+│   │   ├── parser.py       # URL parsing and slug extraction
+│   │   ├── processor.py    # Data processing and CSV export
+│   │   ├── config.py       # Configuration and environment variables
+│   │   ├── constants.py    # Magic numbers and constants
+│   │   ├── utils.py        # Shared utility functions
+│   │   └── exceptions.py   # Custom exception hierarchy
+│   └── cli/                # CLI components
+│       ├── __init__.py
+│       ├── extractor.py    # Core extraction logic
+│       └── cli_output.py   # CLI output handling
 ├── mango_cli.py            # Enhanced CLI with new commands
 ├── polymarket_extract.py   # Original data extraction CLI
 ├── setup.py                # Package setup and metadata
@@ -203,9 +215,7 @@ export POLYMARKET_SEARCH_LIMIT="20"
 export POLYMARKET_EVENT_MARKETS_LIMIT="100"
 
 # Export Settings
-export POLYMARKET_EXPORT_FORMAT="csv"
 export POLYMARKET_MAX_CSV_MB="100"
-export POLYMARKET_MAX_JSON_MB="50"
 
 # Rate Limiting
 export POLYMARKET_RATE_LIMIT="60"
@@ -267,15 +277,34 @@ export POLYMARKET_LOG_LEVEL="INFO"
 
 ### Key Components
 
-- **API Module**: Unified interface for all Polymarket APIs with automatic fallback
-- **Models Module**: Type-safe data models with validation
-- **Parser Module**: Robust URL parsing with error handling
-- **Processor Module**: Data transformation, statistics, export, and streaming capabilities
-  - `merge_event_price_histories()`: DataFrame-based merging
-  - `stream_event_to_csv()`: Memory-efficient streaming writer
-  - `iterate_event_rows()`: Row-based iteration for large datasets
-- **Config Module**: Centralized configuration management
-- **Exceptions Module**: Hierarchical exception structure
+- **API Module** (`api/`): Unified interface for all Polymarket APIs with automatic fallback
+  - `api.py`: CLOB, Gamma APIs and unified PolymarketAPI interface
+  - `data_api.py`: Data API client for portfolio and user data
+- **Models Module** (`models/`): Type-safe data models with validation
+  - `models.py`: Core data structures (Market, Event, PriceHistory)
+  - `orderbook.py`: Order book models and analysis
+- **Utils Module** (`utils/`): Utilities and helpers
+  - `parser.py`: Robust URL parsing with error handling
+  - `processor.py`: Data transformation, statistics, and CSV export
+    - `merge_event_price_histories()`: DataFrame-based merging
+    - `stream_event_to_csv()`: Memory-efficient streaming writer
+    - `iterate_event_rows()`: Row-based iteration for large datasets
+  - `config.py`: Centralized configuration management
+  - `constants.py`: Magic numbers and strings
+  - `utils.py`: Shared utility functions (column naming, formatting)
+  - `exceptions.py`: Hierarchical exception structure
+- **CLI Module** (`cli/`): Command-line interface components
+  - `extractor.py`: Core extraction logic separated from CLI
+  - `cli_output.py`: Consistent output handling and user feedback
+
+### Code Organization Benefits
+
+The refactored architecture provides:
+- **Separation of Concerns**: Business logic separated from presentation
+- **Reduced Duplication**: Shared utilities eliminate repeated code
+- **Better Testability**: Modular design enables unit testing
+- **Easier Maintenance**: Clear module boundaries and single responsibility
+- **Improved Extensibility**: Easy to add new features without modifying core
 
 ## Event Data Extraction
 
@@ -306,61 +335,6 @@ timestamp,liverpool_yes,liverpool_no,manchester_city_yes,manchester_city_no,...
 ### Performance Note
 Extracting large events (20+ markets) may take several minutes due to rate limiting.
 
-### Working with Resolved Markets
-
-Resolved (closed) markets often have different API behavior than active markets. The tool provides special handling for these cases:
-
-#### Using --use-max-interval
-The `--use-max-interval` flag is specifically designed for resolved markets:
-
-```bash
-# Get all historical data for a resolved market
-polymarket-extract "https://polymarket.com/resolved-market-url" --use-max-interval
-
-# Works with event extraction too
-polymarket-extract "EVENT_URL" --extract-all-markets --use-max-interval --streaming
-```
-
-This flag:
-- Uses `interval=max` parameter which bypasses date range limitations
-- Retrieves all available historical data without specifying dates
-- Avoids "interval is too long" errors common with resolved markets
-- Automatically falls back to date ranges if max interval fails
-
-#### Automatic Detection with --auto-dates
-When using `--auto-dates`, the tool automatically detects if a market is resolved and switches to the most appropriate method:
-
-```bash
-# Automatically handles resolved markets
-polymarket-extract "https://polymarket.com/resolved-market" --auto-dates
-```
-
-### Automatic Date Detection (--auto-dates)
-
-The `--auto-dates` flag automatically determines the optimal date range for extracting historical data:
-
-#### How It Works
-1. **Market Metadata**: First checks if the market has start/end dates in its metadata
-2. **Binary Search**: If no metadata, uses binary search to find the earliest available data
-3. **Smart Retry**: Automatically reduces time ranges when API limits are hit
-
-#### Usage Examples
-```bash
-# Automatically detect full history for any market
-polymarket-extract "URL" --auto-dates
-
-# Works with event extraction too
-polymarket-extract "EVENT_URL" --extract-all-markets --auto-dates --streaming
-
-# Can still override with manual dates
-polymarket-extract "URL" --auto-dates --end 2024-01-01
-```
-
-#### Benefits
-- **No Manual Guessing**: Automatically finds all available data
-- **Handles All Markets**: Works for new, old, active, and resolved markets
-- **API-Friendly**: Automatically adjusts when hitting API limits
-- **Transparent**: Shows detected date ranges before fetching
 
 ### Memory Efficiency
 
@@ -528,29 +502,11 @@ The `DataProcessor` class provides comprehensive data manipulation:
 - Forward-fills missing values for continuous time series
 - Maintains timestamp alignment across outcomes
 
-### Export Formats
-
-#### CSV Format
+### CSV Export Format
 - Optional metadata header with market details
 - Columnar format: timestamp, outcome1_price, outcome2_price
-- Configurable decimal precision
-
-#### JSON Format
-- Nested structure with market metadata and price data
-- ISO format timestamps
-- Pretty-printing option
-
-#### Excel Format
-- Multiple sheets:
-  - "Price History": Time series data
-  - "Metadata": Market information
-  - "{Outcome} Stats": Statistical summary per outcome
-- Formatted for readability
-
-#### Parquet Format
-- Efficient binary format for large datasets
-- Preserves data types and precision
-- Ideal for further analysis in pandas/spark
+- Configurable decimal precision (default: 4 decimal places)
+- Automatic forward-filling of missing data points
 
 ### Summary Reports
 - Human-readable text format
@@ -638,19 +594,15 @@ polymarket-extract "URL" -d 90 -o analysis
 
 # Extract ALL markets from an event
 polymarket-extract "https://polymarket.com/event/english-premier-league-winner" \
-  --extract-all-markets -o epl_all_teams -f csv
+  --extract-all-markets -o epl_all_teams
 
-# Extract event with custom column naming
+# Extract event data
 polymarket-extract "https://polymarket.com/event/2024-presidential-election" \
-  --extract-all-markets --column-format short -o election_data
+  --extract-all-markets -o election_data
 
 # Memory-efficient extraction for large events
 polymarket-extract "https://polymarket.com/event/english-premier-league-winner" \
-  --extract-all-markets -o epl_all_teams -f csv --streaming -d 7
-
-# Maximum memory efficiency with all optimizations
-polymarket-extract "https://polymarket.com/event/us-election-2024" \
-  --extract-all-markets -o election_data -f csv --low-memory --chunk-size 3
+  --extract-all-markets -o epl_all_teams --streaming -d 7
 ```
 
 ### Programmatic Usage
@@ -780,15 +732,10 @@ flake8 polymarket/
 #### "invalid filters: 'startTs' and 'endTs' interval is too long"
 **Problem**: API rejects time range for markets (especially resolved ones)
 **Solutions**:
-1. Use `--use-max-interval` for resolved markets to get all data
-2. Use `--auto-dates` to automatically find valid date range
-3. Use fewer days: `-d 7` or `-d 3`
-4. Specify exact dates: `--start 2025-07-28 --end 2025-08-02`
-5. Check market creation date - new markets have limited history
+1. Use fewer days: `-d 7` or `-d 3`
+2. Specify exact dates: `--start 2025-07-28 --end 2025-08-02`
+3. Check market creation date - new markets have limited history
 
-#### File Extension Issues
-**Problem**: Excel files created with .excel extension
-**Solution**: The library creates proper .xlsx files
 
 #### Memory Usage Patterns
 - **25 markets × 1441 points × 2 outcomes = 72,050 data points**

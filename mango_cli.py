@@ -20,10 +20,10 @@ from polymarket import (
     PolymarketAPI, PolymarketURLParser, DataProcessor,
     MarketHistoricalData, TimeInterval, OrderBook
 )
-from polymarket.config import (
+from polymarket.utils.config import (
     DEFAULT_API_KEY, LOG_LEVEL, LOG_FORMAT
 )
-from polymarket.exceptions import (
+from polymarket.utils.exceptions import (
     PolymarketError, InvalidURLError, MarketNotFoundError
 )
 

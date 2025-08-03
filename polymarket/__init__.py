@@ -8,11 +8,14 @@ __version__ = "1.0.0"
 __author__ = "Polymarket Data Team"
 
 from .models import Market, Event, PriceHistory, PricePoint, MarketHistoricalData, TimeInterval, EventHistoricalData
+from .models.orderbook import OrderBook, OrderLevel, MarketOrderBooks
 from .api import PolymarketAPI
-from .parser import PolymarketURLParser
-from .processor import DataProcessor
-from .orderbook import OrderBook, OrderLevel, MarketOrderBooks
-from .data_api import DataAPIClient
+from .api.data_api import DataAPIClient
+from .utils.parser import PolymarketURLParser
+from .utils.processor import DataProcessor
+from .utils import get_column_prefix, format_price, format_volume
+from .cli.extractor import PolymarketExtractor
+from .cli.cli_output import CLIReporter
 
 __all__ = [
     "Market",
@@ -29,4 +32,9 @@ __all__ = [
     "OrderLevel",
     "MarketOrderBooks",
     "DataAPIClient",
+    "PolymarketExtractor",
+    "CLIReporter",
+    "get_column_prefix",
+    "format_price",
+    "format_volume",
 ]

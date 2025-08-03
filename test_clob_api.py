@@ -4,8 +4,8 @@
 import sys
 sys.path.insert(0, '/Users/admin/code/mango')
 
-from polymarket.api import CLOBAPIClient
-from polymarket.models import TimeInterval, Market
+from polymarket.api.api import CLOBAPIClient
+from polymarket.models.models import TimeInterval, Market
 import time
 
 # Initialize CLOB client

@@ -14,13 +14,13 @@ from typing import Optional, Dict, List, Any, Union
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from .models import Market, Event, PriceHistory, PricePoint, TimeInterval
-from .config import (
+from ..models import Market, Event, PriceHistory, PricePoint, TimeInterval
+from ..utils.config import (
     CLOB_BASE_URL, GAMMA_BASE_URL, DATA_API_URL, DEFAULT_TIMEOUT,
     MAX_RETRIES, RETRY_DELAY, USER_AGENT
 )
-from .exceptions import APIError, RateLimitError, MarketNotFoundError
-from .orderbook import OrderBook, MarketOrderBooks
+from ..utils.exceptions import APIError, RateLimitError, MarketNotFoundError
+from ..models.orderbook import OrderBook, MarketOrderBooks
 
 
 logger = logging.getLogger(__name__)

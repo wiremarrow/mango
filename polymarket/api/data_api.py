@@ -10,8 +10,8 @@ from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 
 from .api import BaseAPIClient
-from .config import DATA_API_URL, DEFAULT_TIMEOUT
-from .exceptions import APIError, AuthenticationError
+from ..utils.config import DATA_API_URL, DEFAULT_TIMEOUT
+from ..utils.exceptions import APIError, AuthenticationError
 
 
 logger = logging.getLogger(__name__)
