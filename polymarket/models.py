@@ -122,6 +122,14 @@ class Market:
     # Additional fields for flexibility
     metadata: Dict[str, Any] = field(default_factory=dict)
     
+    def is_inactive_negrisk_option(self) -> bool:
+        """Check if this is an inactive option in a negRisk market."""
+        return (
+            self.neg_risk and 
+            self.neg_risk_market_id and
+            (not self.token_ids or all(not tid for tid in self.token_ids))
+        )
+    
     @classmethod
     def from_gamma_response(cls, data: Dict[str, Any]) -> 'Market':
         """Create a Market from Gamma API response."""
@@ -181,12 +189,25 @@ class Market:
     @classmethod
     def from_clob_response(cls, data: Dict[str, Any]) -> 'Market':
         """Create a Market from CLOB API response."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Debug log for negRisk markets
+        if data.get('neg_risk'):
+            logger.debug(f"Processing negRisk market: {data.get('market_slug')}")
+            logger.debug(f"neg_risk_market_id: {data.get('neg_risk_market_id')}")
+            logger.debug(f"tokens: {data.get('tokens', [])}")
+        
         # Extract token IDs and outcomes from tokens array
         token_ids = []
         outcomes = []
         for token in data.get('tokens', []):
-            token_ids.append(token['token_id'])
-            outcomes.append(token['outcome'])
+            token_id = token.get('token_id', '')
+            outcome = token.get('outcome', '')
+            # Only add non-empty token IDs
+            if token_id and outcome:
+                token_ids.append(token_id)
+                outcomes.append(outcome)
         
         # Parse end date
         end_date = None

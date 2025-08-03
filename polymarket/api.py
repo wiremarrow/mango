@@ -9,6 +9,7 @@ import httpx
 import asyncio
 import time
 import logging
+import json
 from typing import Optional, Dict, List, Any, Union
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -284,12 +285,18 @@ class CLOBAPIClient(BaseAPIClient):
             'interval': interval.value
         }
         
-        if start_ts:
-            params['startTs'] = start_ts
-        if end_ts:
-            params['endTs'] = end_ts
-        if fidelity:
-            params['fidelity'] = fidelity
+        # When using interval parameter, don't include startTs/endTs
+        if interval == TimeInterval.MAX:
+            # interval=max is mutually exclusive with date parameters
+            if fidelity:
+                params['fidelity'] = fidelity
+        else:
+            if start_ts:
+                params['startTs'] = start_ts
+            if end_ts:
+                params['endTs'] = end_ts
+            if fidelity:
+                params['fidelity'] = fidelity
             
         try:
             response = self._request_with_retry('GET', '/prices-history', params=params)

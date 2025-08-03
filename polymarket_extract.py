@@ -17,10 +17,10 @@ from typing import Optional, List, Union
 
 from polymarket import (
     PolymarketAPI, PolymarketURLParser, DataProcessor,
-    MarketHistoricalData, TimeInterval, EventHistoricalData
+    MarketHistoricalData, TimeInterval, EventHistoricalData, Market
 )
 from polymarket.config import (
-    DEFAULT_DAYS_BACK, DEFAULT_INTERVAL, DEFAULT_EXPORT_FORMAT,
+    DEFAULT_DAYS_BACK, DEFAULT_INTERVAL,
     LOG_LEVEL, LOG_FORMAT, DEFAULT_API_KEY, MARKET_SEARCH_LIMIT
 )
 from polymarket.exceptions import (
@@ -41,12 +41,16 @@ class PolymarketExtractor:
         self.api = PolymarketAPI(api_key or DEFAULT_API_KEY)
         self.parser = PolymarketURLParser()
         
+    # Auto-dates detection methods removed for simplicity
+    
     def extract_from_url(self,
                         url: str,
                         interval: str = DEFAULT_INTERVAL,
                         days_back: int = DEFAULT_DAYS_BACK,
                         start_date: Optional[str] = None,
-                        end_date: Optional[str] = None) -> Optional[MarketHistoricalData]:
+                        end_date: Optional[str] = None,
+                        auto_dates: bool = False,
+                        use_max_interval: bool = False) -> Optional[MarketHistoricalData]:
         """
         Extract historical data from a Polymarket URL.
         
@@ -135,6 +139,21 @@ class PolymarketExtractor:
             print(f"Condition ID: {market.condition_id}")
             print(f"Outcomes: {', '.join(market.outcomes)}")
             
+            # Check if market has valid token IDs
+            if not market.token_ids or all(not tid for tid in market.token_ids):
+                logger.warning(f"Market has no valid token IDs")
+                if market.is_inactive_negrisk_option():
+                    print("\nError: This option in the grouped market is not yet active for trading.")
+                    print(f"Market: {market.question}")
+                    print("This appears to be a placeholder or unactivated option in a negRisk market.")
+                    print("\nSuggestions:")
+                    print("1. Try extracting active options from the event page")
+                    print("2. Use --extract-all-markets on the event URL (active options only)")
+                else:
+                    print("\nError: This market does not have tradeable tokens yet.")
+                    print("It may be a future market that hasn't been activated for trading.")
+                return None
+            
             # Calculate time range
             if start_date:
                 start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp())
@@ -146,13 +165,43 @@ class PolymarketExtractor:
             else:
                 end_ts = int(time.time())
             
-            # Fetch price history
+            # Fetch price history with retry logic
             logger.info(f"Fetching price history (interval: {interval})...")
             print(f"\nFetching price history...")
             
-            price_histories = self.api.get_price_history(
-                market, interval, start_ts, end_ts
-            )
+            price_histories = None
+            retry_count = 0
+            max_retries = 3
+            current_start = start_ts
+            current_end = end_ts
+            
+            # Standard retry logic with date ranges
+            while retry_count < max_retries:
+                try:
+                    price_histories = self.api.get_price_history(
+                        market, interval, current_start, current_end
+                    )
+                    
+                    if price_histories:
+                        break  # Success!
+                        
+                except Exception as e:
+                    if "interval is too long" in str(e) and retry_count < max_retries - 1:
+                        # Reduce the time range by 50%
+                        time_span = current_end - current_start
+                        new_span = time_span // 2
+                        current_start = current_end - new_span
+                        
+                        logger.warning(f"Time range too long, reducing to {new_span // (24*60*60)} days...")
+                        print(f"API limit reached, adjusting to {new_span // (24*60*60)} days...")
+                        retry_count += 1
+                        continue
+                    else:
+                        # Re-raise other errors or if we've exhausted retries
+                        raise
+                
+                # If we get here with no data and no exception, break
+                break
             
             if not price_histories:
                 logger.warning("No price history available")
@@ -201,7 +250,9 @@ class PolymarketExtractor:
                                  start_date: Optional[str] = None,
                                  end_date: Optional[str] = None,
                                  chunk_size: Optional[int] = None,
-                                 enable_gc: bool = False) -> Optional[EventHistoricalData]:
+                                 enable_gc: bool = False,
+                                 auto_dates: bool = False,
+                                 use_max_interval: bool = False) -> Optional[EventHistoricalData]:
         """
         Extract historical data for all markets in an event.
         
@@ -234,7 +285,26 @@ class PolymarketExtractor:
             
             # Display event information
             print(f"\nEvent: {event.title}")
-            print(f"Markets to extract: {len(event.markets)}")
+            
+            # Count active vs inactive markets
+            active_markets = []
+            inactive_negrisk = 0
+            other_inactive = 0
+            
+            for market in event.markets:
+                if market.token_ids and any(tid for tid in market.token_ids):
+                    active_markets.append(market)
+                elif market.is_inactive_negrisk_option():
+                    inactive_negrisk += 1
+                else:
+                    other_inactive += 1
+            
+            print(f"Total markets: {len(event.markets)}")
+            print(f"Active markets: {len(active_markets)}")
+            if inactive_negrisk > 0:
+                print(f"Inactive negRisk options: {inactive_negrisk} (will be skipped)")
+            if other_inactive > 0:
+                print(f"Other inactive markets: {other_inactive} (will be skipped)")
             
             # Calculate time range
             if start_date:
@@ -258,11 +328,43 @@ class PolymarketExtractor:
                 market_name = market.group_item_title or market.question[:50]
                 print(f"\n[{i}/{len(event.markets)}] Extracting: {market_name}...")
                 
+                # Skip markets without valid token IDs
+                if not market.token_ids or all(not tid for tid in market.token_ids):
+                    if market.is_inactive_negrisk_option():
+                        print(f"  Skipping: Inactive negRisk option (placeholder)")
+                    else:
+                        print(f"  Skipping: No tradeable tokens available")
+                    failed += 1
+                    continue
+                
                 try:
-                    # Fetch price history for this market
-                    price_histories = self.api.get_price_history(
-                        market, interval, start_ts, end_ts
-                    )
+                    # Fetch price history for this market with retry logic
+                    price_histories = None
+                    retry_count = 0
+                    max_retries = 3
+                    current_start = start_ts
+                    current_end = end_ts
+                    
+                    # Standard date range approach
+                    while retry_count < max_retries:
+                            try:
+                                price_histories = self.api.get_price_history(
+                                    market, interval, current_start, current_end
+                                )
+                                break  # Success!
+                            except Exception as api_error:
+                                if "interval is too long" in str(api_error) and retry_count < max_retries - 1:
+                                    # Reduce the time range by 50%
+                                    time_span = current_end - current_start
+                                    new_span = time_span // 2
+                                    current_start = current_end - new_span
+                                    
+                                    logger.warning(f"Time range too long for {market_name}, reducing to {new_span // (24*60*60)} days...")
+                                    retry_count += 1
+                                    continue
+                                else:
+                                    # Re-raise for other errors or if exhausted retries
+                                    raise
                     
                     if price_histories:
                         # Create MarketHistoricalData
@@ -330,8 +432,8 @@ Examples:
   # Extract data for a specific date range
   %(prog)s "https://polymarket.com/event/market-name" --start 2024-01-01 --end 2024-01-31
   
-  # Export to multiple formats
-  %(prog)s "https://polymarket.com/event/market-name" -o market_data -f csv json excel
+  # Export to CSV (default format)
+  %(prog)s "https://polymarket.com/event/market-name" -o market_data
   
   # Get maximum available data
   %(prog)s "https://polymarket.com/event/market-name" -i max
@@ -372,13 +474,7 @@ Examples:
         help="Output file path (without extension)"
     )
     
-    parser.add_argument(
-        "-f", "--formats",
-        nargs="+",
-        default=[DEFAULT_EXPORT_FORMAT],
-        choices=["csv", "json", "excel", "parquet"],
-        help=f"Output formats (default: {DEFAULT_EXPORT_FORMAT})"
-    )
+    # CSV is the only supported format now
     
     parser.add_argument(
         "--api-key",
@@ -391,12 +487,7 @@ Examples:
         help="Extract data for all markets in an event (only works with event URLs)"
     )
     
-    parser.add_argument(
-        "--column-format",
-        default="short",
-        choices=["short", "full", "descriptive"],
-        help="Column naming format for multi-market exports (default: short)"
-    )
+    # Column format is always 'short' now
     
     parser.add_argument(
         "--streaming",
@@ -404,29 +495,14 @@ Examples:
         help="Use memory-efficient streaming mode for CSV exports (auto-enabled for large events)"
     )
     
-    parser.add_argument(
-        "--chunk-size",
-        type=int,
-        default=5,
-        help="Number of markets to process at a time in chunk mode (default: 5)"
-    )
+    # Memory optimization simplified to just --streaming
     
-    parser.add_argument(
-        "--low-memory",
-        action="store_true",
-        help="Enable all memory optimizations (implies --streaming)"
-    )
+    # Date detection removed for simplicity
     
     parser.add_argument(
         "--summary",
         action="store_true",
         help="Print summary report to console"
-    )
-    
-    parser.add_argument(
-        "--no-metadata",
-        action="store_true",
-        help="Exclude metadata from CSV output"
     )
     
     parser.add_argument(
@@ -461,11 +537,10 @@ Examples:
             auto_streaming = event and len(event.markets) > 10 and not args.streaming
             
             if auto_streaming:
-                print(f"\n⚡ Auto-enabling streaming mode for {len(event.markets)} markets")
+                print(f"\nAuto-enabling streaming mode for {len(event.markets)} markets")
             
             # Enable optimizations if requested
-            enable_gc = args.low_memory
-            use_streaming = args.streaming or args.low_memory or auto_streaming
+            use_streaming = args.streaming or auto_streaming
             
             # Extract all markets
             event_data = extractor.extract_all_event_markets(
@@ -474,8 +549,10 @@ Examples:
                 days_back=args.days,
                 start_date=args.start,
                 end_date=args.end,
-                chunk_size=args.chunk_size if args.low_memory else None,
-                enable_gc=enable_gc
+                chunk_size=None,
+                enable_gc=use_streaming,
+                auto_dates=False,
+                use_max_interval=False
             )
             
             if not event_data:
@@ -491,31 +568,27 @@ Examples:
             if args.output:
                 print(f"\nExporting event data...")
                 
-                for format in args.formats:
-                    try:
-                        # Map format to proper file extension
-                        file_ext = 'xlsx' if format == 'excel' else format
-                        
-                        # If output path doesn't start with / or contain /, prepend data/
-                        if not args.output.startswith('/') and '/' not in args.output:
-                            filepath = f"data/{args.output}.{file_ext}"
-                        else:
-                            filepath = f"{args.output}.{file_ext}"
-                        
-                        DataProcessor.save_event_to_file(
-                            event_data,
-                            filepath,
-                            format=format,
-                            column_format=args.column_format
-                        )
-                        
-                        print(f"  ✓ Saved {format.upper()}: {filepath}")
-                        
-                    except Exception as e:
-                        logger.error(f"Failed to save {format}: {e}")
-                        print(f"  ✗ Failed to save {format.upper()}: {e}")
+                try:
+                    # If output path doesn't start with / or contain /, prepend data/
+                    if not args.output.startswith('/') and '/' not in args.output:
+                        filepath = f"data/{args.output}.csv"
+                    else:
+                        filepath = f"{args.output}.csv"
+                    
+                    # Check if we should use streaming
+                    if use_streaming:
+                        print("Using memory-efficient streaming mode...")
+                        DataProcessor.stream_event_to_csv(event_data, filepath)
+                    else:
+                        DataProcessor.save_event_to_file(event_data, filepath)
+                    
+                    print(f"  Saved CSV: {filepath}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to save CSV: {e}")
+                    print(f"  Failed to save CSV: {e}")
             else:
-                print("\n✓ Extraction complete. Use -o to specify output path.")
+                print("\nExtraction complete. Use -o to specify output path.")
         
         else:
             # Single market extraction (original behavior)
@@ -524,7 +597,9 @@ Examples:
                 interval=args.interval,
                 days_back=args.days,
                 start_date=args.start,
-                end_date=args.end
+                end_date=args.end,
+                auto_dates=False,
+                use_max_interval=False
             )
             
             if not data:
@@ -544,38 +619,27 @@ Examples:
             if args.output:
                 print(f"\nExporting data...")
                 
-                for format in args.formats:
-                    try:
-                        # Map format to proper file extension
-                        file_ext = 'xlsx' if format == 'excel' else format
+                try:
+                    # If output path doesn't start with / or contain /, prepend data/
+                    if not args.output.startswith('/') and '/' not in args.output:
+                        filepath = f"data/{args.output}.csv"
+                    else:
+                        filepath = f"{args.output}.csv"
+                    
+                    DataProcessor.save_to_file(
+                        data, 
+                        filepath, 
+                        include_metadata=True
+                    )
                         
-                        # If output path doesn't start with / or contain /, prepend data/
-                        if not args.output.startswith('/') and '/' not in args.output:
-                            filepath = f"data/{args.output}.{file_ext}"
-                        else:
-                            filepath = f"{args.output}.{file_ext}"
-                        
-                        if format == "csv":
-                            DataProcessor.save_to_file(
-                                data, 
-                                filepath, 
-                                format=format,
-                                include_metadata=not args.no_metadata
-                            )
-                        else:
-                            DataProcessor.save_to_file(data, filepath, format=format)
-                            
-                        print(f"  ✓ Saved {format.upper()}: {filepath}")
-                        
-                    except Exception as e:
-                        logger.error(f"Failed to save {format}: {e}")
-                        print(f"  ✗ Failed to save {format.upper()}: {e}")
+                    print(f"  Saved CSV: {filepath}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to save CSV: {e}")
+                    print(f"  Failed to save CSV: {e}")
             else:
-                # If no output specified, print to console
-                if "json" in args.formats:
-                    print("\n" + DataProcessor.to_json(data))
-                else:
-                    print("\n" + DataProcessor.to_csv(data, include_metadata=not args.no_metadata))
+                # If no output specified, print CSV to console
+                print("\n" + DataProcessor.to_csv(data, include_metadata=True))
                 
         return 0
         

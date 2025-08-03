@@ -6,7 +6,6 @@ and export functionality for market historical data.
 """
 
 import pandas as pd
-import json
 import csv
 import io
 import logging
@@ -15,11 +14,11 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Union, Iterator, Tuple
 from datetime import datetime
 from collections import defaultdict
+from tabulate import tabulate
 
 from .models import MarketHistoricalData, PriceHistory, EventHistoricalData
 from .config import (
-    EXCEL_ENGINE, MAX_CSV_SIZE_MB, MAX_JSON_SIZE_MB,
-    PRICE_PRECISION, DEFAULT_EXPORT_FORMAT
+    MAX_CSV_SIZE_MB, PRICE_PRECISION
 )
 from .exceptions import ExportError, DataProcessingError
 
@@ -80,14 +79,12 @@ class DataProcessor:
             raise DataProcessingError(f"Failed to merge price histories: {e}")
     
     @staticmethod
-    def merge_event_price_histories(event_data: EventHistoricalData, 
-                                  column_format: str = 'short') -> pd.DataFrame:
+    def merge_event_price_histories(event_data: EventHistoricalData) -> pd.DataFrame:
         """
         Merge all market price histories from an event into a single DataFrame.
         
         Args:
             event_data: EventHistoricalData containing all market data
-            column_format: Column naming format ('short', 'full', 'descriptive')
             
         Returns:
             DataFrame with timestamp index and columns for each market/outcome combination
@@ -102,30 +99,22 @@ class DataProcessor:
             for market_slug, market_data in event_data.market_data.items():
                 market = market_data.market
                 
-                # Determine column prefix based on format
-                if column_format == 'short':
-                    # Use group_item_title if available, otherwise extract from slug
-                    if market.group_item_title:
-                        prefix = market.group_item_title.lower().replace(' ', '_')
-                    else:
-                        # Extract key part from slug (e.g., "will-liverpool-win" -> "liverpool")
-                        parts = market_slug.split('-')
-                        if 'will' in parts:
-                            idx = parts.index('will')
-                            if idx + 1 < len(parts):
-                                prefix = parts[idx + 1]
-                            else:
-                                prefix = market_slug[:20]
+                # Determine column prefix using short format
+                # Use group item title if available, otherwise extract from slug
+                if market.group_item_title:
+                    prefix = market.group_item_title.lower().replace(' ', '_')
+                else:
+                    # Try to extract meaningful prefix from slug
+                    parts = market_slug.split('-')
+                    if 'will' in parts:
+                        # Extract the main subject after 'will'
+                        idx = parts.index('will')
+                        if idx + 1 < len(parts):
+                            prefix = parts[idx + 1]
                         else:
                             prefix = market_slug[:20]
-                elif column_format == 'full':
-                    prefix = market_slug
-                else:  # descriptive
-                    if market.group_item_title:
-                        prefix = market.group_item_title.replace(' ', '_')
                     else:
-                        # Use question but clean it up
-                        prefix = market.question[:50].replace(' ', '_').replace('?', '')
+                        prefix = market_slug[:20]
                 
                 # Create DataFrame for this market
                 for outcome, history in market_data.price_histories.items():
@@ -142,12 +131,12 @@ class DataProcessor:
             
             if not all_dfs:
                 return pd.DataFrame()
-                
+            
             # Merge all DataFrames
             result = all_dfs[0]
             for df in all_dfs[1:]:
                 result = result.join(df, how='outer')
-                
+            
             # Forward fill missing values
             result.ffill(inplace=True)
             result.reset_index(inplace=True)
@@ -158,7 +147,7 @@ class DataProcessor:
             raise DataProcessingError(f"Failed to merge event price histories: {e}")
     
     @staticmethod
-    def calculate_statistics(history: PriceHistory) -> Dict[str, Any]:
+    def calculate_statistics(history: PriceHistory) -> Dict[str, float]:
         """
         Calculate statistical metrics for a price history.
         
@@ -169,9 +158,17 @@ class DataProcessor:
             Dictionary with statistical metrics
         """
         if not history.price_points:
-            return {}
-            
-        prices = [point.price for point in history.price_points]
+            return {
+                'count': 0,
+                'mean': 0,
+                'std': 0,
+                'min': 0,
+                'max': 0,
+                'median': 0,
+                'volatility': 0
+            }
+        
+        prices = [p.price for p in history.price_points]
         df = pd.DataFrame(prices, columns=['price'])
         
         # Calculate returns for volatility
@@ -191,6 +188,71 @@ class DataProcessor:
             'change_percent': history.price_change_percent,
             'data_points': history.data_points_count
         }
+    
+    @staticmethod
+    def create_summary_report(data: MarketHistoricalData) -> str:
+        """
+        Create a human-readable summary report of market historical data.
+        
+        Args:
+            data: MarketHistoricalData object
+            
+        Returns:
+            Formatted summary report string
+        """
+        try:
+            lines = []
+            lines.append("\n" + "=" * 80)
+            lines.append("MARKET SUMMARY REPORT")
+            lines.append("=" * 80)
+            lines.append("")
+            
+            # Market info table
+            market_info = [
+                ["Question", data.market.question],
+                ["Slug", data.market.slug],
+                ["Status", "Active" if data.market.active else "Inactive"],
+                ["Volume", f"${data.market.volume:,.2f}"],
+                ["Liquidity", f"${data.market.liquidity:,.2f}"]
+            ]
+            lines.append(tabulate(market_info, tablefmt="simple", colalign=("left", "left")))
+            lines.append("")
+            
+            # Price statistics for each outcome
+            for outcome, history in data.price_histories.items():
+                if history.price_points:
+                    stats = DataProcessor.calculate_statistics(history)
+                    
+                    lines.append(f"\n{outcome} Outcome Statistics")
+                    lines.append("-" * 40)
+                    
+                    stats_table = [
+                        ["Metric", "Value"],
+                        ["Data Points", f"{stats['data_points']:,}"],
+                        ["Latest Price", f"${stats['latest']:.4f}"],
+                        ["Oldest Price", f"${stats['oldest']:.4f}"],
+                    ]
+                    
+                    if stats['change'] is not None:
+                        stats_table.append(["Price Change", f"${stats['change']:.4f} ({stats['change_percent']:.2f}%)"])
+                    
+                    stats_table.extend([
+                        ["Mean Price", f"${stats['mean']:.4f}"],
+                        ["Std Deviation", f"${stats['std']:.4f}"],
+                        ["Min Price", f"${stats['min']:.4f}"],
+                        ["Max Price", f"${stats['max']:.4f}"],
+                        ["Median Price", f"${stats['median']:.4f}"],
+                        ["Volatility", f"{stats['volatility']:.4f}"]
+                    ])
+                    
+                    lines.append(tabulate(stats_table, headers="firstrow", tablefmt="github", floatfmt=".4f"))
+            
+            lines.append("\n" + "=" * 80)
+            return "\n".join(lines)
+            
+        except Exception as e:
+            logger.error(f"Failed to create summary report: {e}")
+            return f"Error creating summary report: {e}"
     
     @staticmethod
     def to_csv(data: MarketHistoricalData, include_metadata: bool = True) -> str:
@@ -241,254 +303,54 @@ class DataProcessor:
             raise ExportError(f"Failed to generate CSV: {e}")
     
     @staticmethod
-    def to_json(data: MarketHistoricalData, pretty: bool = True) -> str:
-        """
-        Convert market historical data to JSON format.
-        
-        Args:
-            data: MarketHistoricalData object
-            pretty: Whether to pretty-print the JSON
-            
-        Returns:
-            JSON string
-            
-        Raises:
-            ExportError: If JSON generation fails
-        """
-        try:
-            data_dict = data.to_dict()
-            
-            if pretty:
-                return json.dumps(data_dict, indent=2, default=str)
-            else:
-                return json.dumps(data_dict, default=str)
-                
-        except Exception as e:
-            raise ExportError(f"Failed to generate JSON: {e}")
-    
-    @staticmethod
-    def to_dataframe(data: MarketHistoricalData) -> pd.DataFrame:
-        """
-        Convert market historical data to pandas DataFrame.
-        
-        Args:
-            data: MarketHistoricalData object
-            
-        Returns:
-            DataFrame with price history
-        """
-        return DataProcessor.merge_price_histories(data.price_histories)
-    
-    @staticmethod
     def save_to_file(data: MarketHistoricalData, 
                     filepath: Union[str, Path],
-                    format: str = DEFAULT_EXPORT_FORMAT,
-                    **kwargs) -> None:
+                    include_metadata: bool = True) -> None:
         """
-        Save market historical data to a file.
+        Save market historical data to a CSV file.
         
         Args:
             data: MarketHistoricalData object
             filepath: Output file path
-            format: Output format ('csv', 'json', 'parquet', 'excel')
-            **kwargs: Additional arguments for the specific format
-            
-        Raises:
-            ExportError: If file save fails
+            include_metadata: Whether to include market metadata
         """
-        filepath = Path(filepath)
-        # Ensure parent directory exists (including data/ directory)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        
         try:
-            if format.lower() == 'csv':
-                csv_data = DataProcessor.to_csv(data, **kwargs)
-                # Check file size
-                size_mb = len(csv_data.encode('utf-8')) / (1024 * 1024)
-                if size_mb > MAX_CSV_SIZE_MB:
-                    raise ExportError(f"CSV file too large: {size_mb:.1f}MB > {MAX_CSV_SIZE_MB}MB")
-                filepath.write_text(csv_data)
-                
-            elif format.lower() == 'json':
-                json_data = DataProcessor.to_json(data, **kwargs)
-                # Check file size
-                size_mb = len(json_data.encode('utf-8')) / (1024 * 1024)
-                if size_mb > MAX_JSON_SIZE_MB:
-                    raise ExportError(f"JSON file too large: {size_mb:.1f}MB > {MAX_JSON_SIZE_MB}MB")
-                filepath.write_text(json_data)
-                
-            elif format.lower() == 'parquet':
-                df = DataProcessor.to_dataframe(data)
-                df.to_parquet(filepath, **kwargs)
-                
-            elif format.lower() == 'excel':
-                df = DataProcessor.to_dataframe(data)
-                
-                # Create Excel writer
-                with pd.ExcelWriter(filepath, engine=EXCEL_ENGINE) as writer:
-                    # Write price data
-                    df.to_excel(writer, sheet_name='Price History', index=False)
-                    
-                    # Write metadata
-                    metadata_df = pd.DataFrame([
-                        ['Market ID', data.market.id],
-                        ['Market Slug', data.market.slug],
-                        ['Question', data.market.question],
-                        ['Condition ID', data.market.condition_id],
-                        ['Outcomes', ', '.join(data.market.outcomes)],
-                        ['Active', data.market.active],
-                        ['Volume', f"${data.market.volume:,.2f}"],
-                        ['Liquidity', f"${data.market.liquidity:,.2f}"]
-                    ], columns=['Property', 'Value'])
-                    metadata_df.to_excel(writer, sheet_name='Metadata', index=False)
-                    
-                    # Write statistics for each outcome
-                    for outcome, history in data.price_histories.items():
-                        stats = DataProcessor.calculate_statistics(history)
-                        stats_df = pd.DataFrame(list(stats.items()), columns=['Metric', 'Value'])
-                        # Sanitize sheet name (Excel has restrictions)
-                        sheet_name = f'{outcome[:28]} Stats' if len(outcome) > 28 else f'{outcome} Stats'
-                        stats_df.to_excel(writer, sheet_name=sheet_name, index=False)
+            filepath = Path(filepath)
+            filepath.parent.mkdir(parents=True, exist_ok=True)
             
-            else:
-                raise ValueError(f"Unsupported format: {format}")
+            csv_data = DataProcessor.to_csv(data, include_metadata=include_metadata)
+            filepath.write_text(csv_data)
                 
-            logger.info(f"Saved {format.upper()} to: {filepath}")
+            logger.info(f"Saved CSV to: {filepath}")
             
         except Exception as e:
-            raise ExportError(f"Failed to save {format} file: {e}")
+            raise ExportError(f"Failed to save CSV file: {e}")
     
     @staticmethod
     def save_event_to_file(data: EventHistoricalData,
-                          filepath: Union[str, Path],
-                          format: str = DEFAULT_EXPORT_FORMAT,
-                          column_format: str = 'short',
-                          **kwargs) -> None:
+                          filepath: Union[str, Path]) -> None:
         """
-        Save event historical data to a file.
+        Save event historical data to a CSV file.
         
         Args:
             data: EventHistoricalData object
             filepath: Output file path
-            format: Output format ('csv', 'json', 'parquet', 'excel')
-            column_format: Column naming format ('short', 'full', 'descriptive')
-            **kwargs: Additional format-specific options
         """
         try:
             filepath = Path(filepath)
+            filepath.parent.mkdir(parents=True, exist_ok=True)
             
-            if format.lower() == 'csv':
-                # Use streaming for better memory efficiency
-                DataProcessor.stream_event_to_csv(data, filepath, column_format)
-                
-            elif format.lower() == 'json':
-                # Convert to JSON with nested structure
-                json_data = json.dumps(data.to_dict(), indent=2, default=str)
-                size_mb = len(json_data.encode()) / (1024 * 1024)
-                if size_mb > MAX_JSON_SIZE_MB:
-                    raise ExportError(f"JSON file too large: {size_mb:.1f}MB > {MAX_JSON_SIZE_MB}MB")
-                filepath.write_text(json_data)
-                
-            elif format.lower() == 'parquet':
-                df = DataProcessor.merge_event_price_histories(data, column_format)
-                df.to_parquet(filepath, **kwargs)
-                
-            elif format.lower() == 'excel':
-                # Create Excel with multiple sheets
-                with pd.ExcelWriter(filepath, engine=EXCEL_ENGINE) as writer:
-                    # Combined sheet
-                    combined_df = DataProcessor.merge_event_price_histories(data, column_format)
-                    combined_df.to_excel(writer, sheet_name='All Markets', index=False)
-                    
-                    # Event metadata sheet
-                    event_metadata_df = pd.DataFrame([
-                        ['Event ID', data.event.id],
-                        ['Event Title', data.event.title],
-                        ['Event Slug', data.event.slug],
-                        ['Total Markets', data.total_markets],
-                        ['Extracted At', data.extracted_at],
-                        ['Neg Risk', data.event.neg_risk],
-                    ], columns=['Property', 'Value'])
-                    event_metadata_df.to_excel(writer, sheet_name='Event Info', index=False)
-                    
-                    # Individual market sheets
-                    for market_slug, market_data in data.market_data.items():
-                        df = DataProcessor.merge_price_histories(market_data.price_histories)
-                        # Sanitize sheet name
-                        if market_data.market.group_item_title:
-                            sheet_name = market_data.market.group_item_title[:30]
-                        else:
-                            sheet_name = market_slug[:30]
-                        df.to_excel(writer, sheet_name=sheet_name, index=False)
-            
-            else:
-                raise ValueError(f"Unsupported format: {format}")
+            # Use streaming for better memory efficiency
+            DataProcessor.stream_event_to_csv(data, filepath)
                 
             logger.info(f"Saved event data ({data.total_markets} markets) to: {filepath}")
             
         except Exception as e:
-            raise ExportError(f"Failed to save event {format} file: {e}")
-    
-    @staticmethod
-    def create_summary_report(data: MarketHistoricalData) -> str:
-        """
-        Create a human-readable summary report of the market data.
-        
-        Args:
-            data: MarketHistoricalData object
-            
-        Returns:
-            Formatted summary report string
-        """
-        lines = []
-        lines.append("=" * 80)
-        lines.append("POLYMARKET HISTORICAL DATA SUMMARY")
-        lines.append("=" * 80)
-        lines.append(f"\nMarket: {data.market.question}")
-        lines.append(f"Slug: {data.market.slug}")
-        lines.append(f"Condition ID: {data.market.condition_id}")
-        lines.append(f"Outcomes: {', '.join(data.market.outcomes)}")
-        
-        lines.append(f"\nMarket Status:")
-        lines.append(f"  Active: {data.market.active}")
-        lines.append(f"  Closed: {data.market.closed}")
-        lines.append(f"  Volume: ${data.market.volume:,.2f}")
-        lines.append(f"  Liquidity: ${data.market.liquidity:,.2f}")
-        
-        lines.append("\n" + "-" * 80)
-        lines.append("PRICE STATISTICS")
-        lines.append("-" * 80)
-        
-        for outcome, history in data.price_histories.items():
-            if history.price_points:
-                stats = DataProcessor.calculate_statistics(history)
-                lines.append(f"\n{outcome}:")
-                lines.append(f"  Latest Price: ${stats['latest']:.{PRICE_PRECISION}f}")
-                lines.append(f"  Change: ${stats.get('change', 0):.{PRICE_PRECISION}f} "
-                           f"({stats.get('change_percent', 0):.2f}%)")
-                lines.append(f"  High: ${stats['max']:.{PRICE_PRECISION}f}")
-                lines.append(f"  Low: ${stats['min']:.{PRICE_PRECISION}f}")
-                lines.append(f"  Mean: ${stats['mean']:.{PRICE_PRECISION}f}")
-                lines.append(f"  Volatility: {stats.get('volatility', 0):.{PRICE_PRECISION}f}")
-                lines.append(f"  Data Points: {stats['count']}")
-                
-                # Time range
-                if history.price_points:
-                    start_time = history.price_points[0].timestamp
-                    end_time = history.price_points[-1].timestamp
-                    lines.append(f"  Time Range: {start_time.strftime('%Y-%m-%d %H:%M')} to "
-                               f"{end_time.strftime('%Y-%m-%d %H:%M')}")
-        
-        lines.append("\n" + "=" * 80)
-        lines.append(f"Data extracted at: {data.extracted_at.strftime('%Y-%m-%d %H:%M:%S')}")
-        lines.append("=" * 80)
-        
-        return '\n'.join(lines)
+            raise ExportError(f"Failed to save event CSV file: {e}")
     
     @staticmethod
     def stream_event_to_csv(event_data: EventHistoricalData,
-                           filepath: Union[str, Path],
-                           column_format: str = 'short') -> None:
+                           filepath: Union[str, Path]) -> None:
         """
         Stream event data directly to CSV without loading all data into memory.
         
@@ -498,7 +360,6 @@ class DataProcessor:
         Args:
             event_data: EventHistoricalData containing all market data
             filepath: Output CSV file path
-            column_format: Column naming format ('short', 'full', 'descriptive')
             
         Raises:
             ExportError: If streaming fails
@@ -517,27 +378,19 @@ class DataProcessor:
             for market_slug, market_data in event_data.market_data.items():
                 market = market_data.market
                 
-                # Determine column prefix
-                if column_format == 'short':
-                    if market.group_item_title:
-                        prefix = market.group_item_title.lower().replace(' ', '_')
-                    else:
-                        parts = market_slug.split('-')
-                        if 'will' in parts:
-                            idx = parts.index('will')
-                            if idx + 1 < len(parts):
-                                prefix = parts[idx + 1]
-                            else:
-                                prefix = market_slug[:20]
+                # Determine column prefix (always use short format)
+                if market.group_item_title:
+                    prefix = market.group_item_title.lower().replace(' ', '_')
+                else:
+                    parts = market_slug.split('-')
+                    if 'will' in parts:
+                        idx = parts.index('will')
+                        if idx + 1 < len(parts):
+                            prefix = parts[idx + 1]
                         else:
                             prefix = market_slug[:20]
-                elif column_format == 'full':
-                    prefix = market_slug
-                else:  # descriptive
-                    if market.group_item_title:
-                        prefix = market.group_item_title.replace(' ', '_')
                     else:
-                        prefix = market.question[:50].replace(' ', '_').replace('?', '')
+                        prefix = market_slug[:20]
                 
                 # Process each outcome's price history
                 for outcome, history in market_data.price_histories.items():
@@ -579,82 +432,63 @@ class DataProcessor:
                     for col in columns:
                         value = row_data.get(col, '')
                         if isinstance(value, float):
-                            row.append(f"{value:.{PRICE_PRECISION}f}")
-                        else:
-                            row.append(value)
-                    
+                            value = round(value, PRICE_PRECISION)
+                        row.append(value)
                     writer.writerow(row)
                     
-                    # Clear this timestamp's data to free memory
-                    del timestamp_data[timestamp]
-                
-                # Final garbage collection
-                gc.collect()
+                    # Clear row data to free memory
+                    del row_data
+                    
+            # Clear the timestamp data
+            del timestamp_data
+            gc.collect()
             
-            logger.info(f"Successfully streamed CSV to: {filepath}")
+            logger.info(f"Successfully streamed {len(timestamps)} rows to {filepath}")
             
         except Exception as e:
-            raise ExportError(f"Failed to stream CSV: {e}")
+            raise ExportError(f"Failed to stream event data to CSV: {e}")
     
     @staticmethod
-    def iterate_event_rows(event_data: EventHistoricalData,
-                          column_format: str = 'short') -> Iterator[Dict[str, Any]]:
+    def iterate_event_rows(event_data: EventHistoricalData) -> Iterator[Tuple[datetime, Dict[str, float]]]:
         """
-        Iterate over event data rows without building complete DataFrame.
-        
-        Yields one row at a time with timestamp and all market prices.
+        Iterate through event data row by row without loading all into memory.
         
         Args:
             event_data: EventHistoricalData containing all market data
-            column_format: Column naming format
             
         Yields:
-            Dict containing timestamp and price columns
+            Tuples of (timestamp, price_dict) for each row
         """
-        # Build column mapping
-        column_map = {}  # (market_slug, outcome) -> column_name
+        # Collect all timestamps and organize data
+        timestamp_data = defaultdict(dict)
         
         for market_slug, market_data in event_data.market_data.items():
             market = market_data.market
             
-            # Determine prefix
-            if column_format == 'short':
-                if market.group_item_title:
-                    prefix = market.group_item_title.lower().replace(' ', '_')
-                else:
-                    parts = market_slug.split('-')
-                    if 'will' in parts and parts.index('will') + 1 < len(parts):
-                        prefix = parts[parts.index('will') + 1]
-                    else:
-                        prefix = market_slug[:20]
-            elif column_format == 'full':
-                prefix = market_slug
+            # Determine column prefix (always use short format)
+            if market.group_item_title:
+                prefix = market.group_item_title.lower().replace(' ', '_')
             else:
-                prefix = (market.group_item_title or market.question[:50]).replace(' ', '_').replace('?', '')
+                prefix = market_slug[:20]
             
-            for outcome in market.outcomes:
-                column_map[(market_slug, outcome)] = f'{prefix}_{outcome.lower()}'
+            # Process each outcome
+            for outcome, history in market_data.price_histories.items():
+                column_name = f'{prefix}_{outcome.lower()}'
+                
+                for point in history.price_points:
+                    timestamp_data[point.timestamp][column_name] = point.price
         
-        # Get all timestamps
-        timestamps = event_data.get_aligned_timestamps()
-        
-        # Yield rows
-        for timestamp in timestamps:
-            row = {'timestamp': timestamp}
+        # Yield rows in chronological order
+        prev_values = {}
+        for timestamp in sorted(timestamp_data.keys()):
+            current_row = timestamp_data[timestamp].copy()
             
-            # Add prices for this timestamp
-            for market_slug, market_data in event_data.market_data.items():
-                for outcome, history in market_data.price_histories.items():
-                    column = column_map.get((market_slug, outcome))
-                    if column:
-                        # Find price at this timestamp
-                        price = None
-                        for point in history.price_points:
-                            if point.timestamp <= timestamp:
-                                price = point.price
-                            else:
-                                break
-                        if price is not None:
-                            row[column] = price
+            # Forward-fill missing values
+            for col, val in prev_values.items():
+                if col not in current_row:
+                    current_row[col] = val
             
-            yield row
+            # Update previous values
+            prev_values.update(current_row)
+            
+            yield timestamp, current_row

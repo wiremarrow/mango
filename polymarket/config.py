@@ -28,9 +28,7 @@ DEFAULT_DAYS_BACK = int(os.getenv("POLYMARKET_DEFAULT_DAYS", "30"))
 DEFAULT_INTERVAL = os.getenv("POLYMARKET_DEFAULT_INTERVAL", "1d")
 MAX_PRICE_POINTS = int(os.getenv("POLYMARKET_MAX_POINTS", "10000"))
 
-# Export Settings
-DEFAULT_EXPORT_FORMAT = os.getenv("POLYMARKET_EXPORT_FORMAT", "csv")
-EXCEL_ENGINE = "openpyxl"
+# Export Settings removed - CSV is the only format
 
 # Logging Configuration
 LOG_LEVEL = os.getenv("POLYMARKET_LOG_LEVEL", "INFO")
@@ -46,7 +44,6 @@ POLYGON_RPC_URL = os.getenv("POLYGON_RPC_URL", "https://polygon-rpc.com")
 
 # File Size Limits
 MAX_CSV_SIZE_MB = int(os.getenv("POLYMARKET_MAX_CSV_MB", "100"))
-MAX_JSON_SIZE_MB = int(os.getenv("POLYMARKET_MAX_JSON_MB", "50"))
 
 # Rate Limiting
 RATE_LIMIT_CALLS_PER_MINUTE = int(os.getenv("POLYMARKET_RATE_LIMIT", "60"))

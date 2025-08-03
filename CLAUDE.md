@@ -39,6 +39,14 @@ polymarket-extract "EVENT_URL" --extract-all-markets --column-format short  # Co
 # Memory-efficient extraction for large events
 polymarket-extract "EVENT_URL" --extract-all-markets -o output_name -f csv --streaming
 polymarket-extract "EVENT_URL" --extract-all-markets -o output_name -f csv --low-memory
+
+# Automatic date detection for historical markets
+polymarket-extract "URL" --auto-dates
+polymarket-extract "EVENT_URL" --extract-all-markets --auto-dates --streaming
+
+# Extract all data from resolved markets using interval=max
+polymarket-extract "RESOLVED_MARKET_URL" --use-max-interval
+polymarket-extract "EVENT_URL" --extract-all-markets --use-max-interval --streaming
 ```
 
 ### Development Commands
@@ -225,6 +233,20 @@ export POLYMARKET_MAX_RETRIES="5"  # Increase for reliability
 - Rate limits: 60 requests/minute (ENFORCE THIS)
 - Historical data limited by market age
 - Order book depth depends on market liquidity
+- Resolved markets: Date ranges often trigger "interval is too long" errors
+- interval=max parameter bypasses date limits for resolved markets
+
+### negRisk Markets (Grouped Prediction Markets)
+- **What they are**: Winner-take-all markets with multiple mutually exclusive options (e.g., "Who will win the 2028 election?" with 128 candidates)
+- **Inactive options**: Some options in negRisk markets are placeholders with empty token IDs
+  - Example: "Person N", "Person BG" in 2028 election are inactive placeholders
+  - Real candidates like "JD Vance", "Gavin Newsom" have valid token IDs
+- **Detection**: Markets with `neg_risk: true` and `neg_risk_market_id` set
+- **Extraction behavior**:
+  - Individual inactive options cannot be extracted (no token IDs)
+  - Use `--extract-all-markets` on the event URL to extract all active options
+  - Event extraction automatically skips inactive options and shows statistics
+- **Error handling**: Clear messages distinguish between inactive negRisk options and other issues
 
 ### Memory Limitations
 - Regular mode: ~800MB per market for large datasets

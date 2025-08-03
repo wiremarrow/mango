@@ -14,7 +14,7 @@ A comprehensive Python library and CLI for Polymarket prediction markets. Extrac
 
 ### Technical Features
 - **Clean Architecture**: Modular design with clear separation of concerns
-- **Multiple Export Formats**: CSV, JSON, Excel, and Parquet
+- **CSV Export**: Optimized CSV format for data analysis
 - **Robust Error Handling**: Retry logic, rate limiting, and clear error messages
 - **Type Safety**: Full type hints throughout the codebase
 - **Flexible Configuration**: Environment variables and settings management
@@ -82,8 +82,8 @@ polymarket-extract "URL" -i 1h -d 7
 # Specific date range
 polymarket-extract "URL" --start 2024-01-01 --end 2024-01-31
 
-# Export to multiple formats (saves to data/ directory by default)
-polymarket-extract "URL" -o market_data -f csv json excel
+# Export to CSV (saves to data/ directory by default)
+polymarket-extract "URL" -o market_data
 
 # Export to specific directory
 polymarket-extract "URL" -o /path/to/output -f csv
@@ -251,16 +251,10 @@ export POLYMARKET_LOG_LEVEL="INFO"
 | `--start` | Start date (YYYY-MM-DD) | None |
 | `--end` | End date (YYYY-MM-DD) | None |
 | `-o, --output` | Output file path (without extension). Saves to `data/` by default | None |
-| `-f, --formats` | Output formats (csv, json, excel, parquet) | csv |
 | `--api-key` | CLOB API key | None |
-| `--summary` | Print summary report | False |
-| `--no-metadata` | Exclude metadata from CSV | False |
 | `-v, --verbose` | Enable verbose logging | False |
 | `--extract-all-markets` | Extract all markets from an event URL | False |
-| `--column-format` | Column naming for event exports (short, full, descriptive) | short |
 | `--streaming` | Use memory-efficient streaming mode for CSV exports | False |
-| `--chunk-size` | Number of markets to process at a time (with --low-memory) | 5 |
-| `--low-memory` | Enable all memory optimizations (implies --streaming) | False |
 
 ## Architecture
 
@@ -277,7 +271,7 @@ export POLYMARKET_LOG_LEVEL="INFO"
 - **Models Module**: Type-safe data models with validation
 - **Parser Module**: Robust URL parsing with error handling
 - **Processor Module**: Data transformation, statistics, export, and streaming capabilities
-  - `merge_event_price_histories()`: DataFrame-based merging (high memory)
+  - `merge_event_price_histories()`: DataFrame-based merging
   - `stream_event_to_csv()`: Memory-efficient streaming writer
   - `iterate_event_rows()`: Row-based iteration for large datasets
 - **Config Module**: Centralized configuration management
@@ -293,10 +287,8 @@ The `--extract-all-markets` flag enables extracting data from all markets within
 3. Merges all data into a single wide-format DataFrame
 4. Exports with customizable column naming
 
-### Column Naming Formats
-- **short**: Uses team/candidate names (e.g., `liverpool_yes`, `liverpool_no`)
-- **full**: Uses complete market slugs
-- **descriptive**: Uses full question text
+### Column Naming
+Columns use short format with team/candidate names (e.g., `liverpool_yes`, `liverpool_no`)
 
 ### Output Format
 The CSV output has timestamps as rows and market outcomes as columns:
@@ -314,6 +306,62 @@ timestamp,liverpool_yes,liverpool_no,manchester_city_yes,manchester_city_no,...
 ### Performance Note
 Extracting large events (20+ markets) may take several minutes due to rate limiting.
 
+### Working with Resolved Markets
+
+Resolved (closed) markets often have different API behavior than active markets. The tool provides special handling for these cases:
+
+#### Using --use-max-interval
+The `--use-max-interval` flag is specifically designed for resolved markets:
+
+```bash
+# Get all historical data for a resolved market
+polymarket-extract "https://polymarket.com/resolved-market-url" --use-max-interval
+
+# Works with event extraction too
+polymarket-extract "EVENT_URL" --extract-all-markets --use-max-interval --streaming
+```
+
+This flag:
+- Uses `interval=max` parameter which bypasses date range limitations
+- Retrieves all available historical data without specifying dates
+- Avoids "interval is too long" errors common with resolved markets
+- Automatically falls back to date ranges if max interval fails
+
+#### Automatic Detection with --auto-dates
+When using `--auto-dates`, the tool automatically detects if a market is resolved and switches to the most appropriate method:
+
+```bash
+# Automatically handles resolved markets
+polymarket-extract "https://polymarket.com/resolved-market" --auto-dates
+```
+
+### Automatic Date Detection (--auto-dates)
+
+The `--auto-dates` flag automatically determines the optimal date range for extracting historical data:
+
+#### How It Works
+1. **Market Metadata**: First checks if the market has start/end dates in its metadata
+2. **Binary Search**: If no metadata, uses binary search to find the earliest available data
+3. **Smart Retry**: Automatically reduces time ranges when API limits are hit
+
+#### Usage Examples
+```bash
+# Automatically detect full history for any market
+polymarket-extract "URL" --auto-dates
+
+# Works with event extraction too
+polymarket-extract "EVENT_URL" --extract-all-markets --auto-dates --streaming
+
+# Can still override with manual dates
+polymarket-extract "URL" --auto-dates --end 2024-01-01
+```
+
+#### Benefits
+- **No Manual Guessing**: Automatically finds all available data
+- **Handles All Markets**: Works for new, old, active, and resolved markets
+- **API-Friendly**: Automatically adjusts when hitting API limits
+- **Transparent**: Shows detected date ranges before fetching
+
 ### Memory Efficiency
 
 The library includes memory-efficient streaming mode for large events:
@@ -327,23 +375,21 @@ The library includes memory-efficient streaming mode for large events:
 - Override with `--streaming` flag or disable with regular DataFrame mode
 
 #### Trade-offs
-| Mode | Memory Usage | Speed | Formats | Error Recovery |
-|------|--------------|-------|---------|----------------|
-| Regular | High (all in memory) | Faster | All formats | All or nothing |
-| Streaming | Low (<1GB) | ~10-20% slower | CSV only | Partial file possible |
+| Mode | Memory Usage | Speed | Error Recovery |
+|------|--------------|-------|-----------------|
+| Regular | High (all in memory) | Faster | All or nothing |
+| Streaming | Low (<1GB) | ~10-20% slower | Partial file possible |
 
 #### When to Use Streaming
 - Large events (10+ markets)
 - Limited RAM available
-- CSV output is sufficient
 - Reliability over speed
 
 #### Memory Crisis Solutions
 If you see "zsh: killed" or similar errors:
-1. Use `--streaming` or `--low-memory` flag
+1. Use `--streaming` flag
 2. Reduce time range with `-d` flag
-3. Use CSV format instead of Excel
-4. Extract specific markets instead of entire event
+3. Extract specific markets instead of entire event
 
 ## API Architecture
 
@@ -587,8 +633,8 @@ polymarket-extract "https://polymarket.com/will-x-happen"
 # Get minute-level data for analysis
 polymarket-extract "https://polymarket.com/will-x-happen" -i 1m -d 1
 
-# Export last 90 days to all formats
-polymarket-extract "URL" -d 90 -o analysis -f csv json excel parquet
+# Export last 90 days to CSV
+polymarket-extract "URL" -d 90 -o analysis
 
 # Extract ALL markets from an event
 polymarket-extract "https://polymarket.com/event/english-premier-league-winner" \
@@ -714,20 +760,31 @@ flake8 polymarket/
 
 ### Common Issues and Solutions
 
+#### negRisk Markets (Grouped Prediction Markets)
+**Problem**: Some markets show "This option in the grouped market is not yet active for trading"
+**What are negRisk markets**: Winner-take-all markets with multiple mutually exclusive options (e.g., election with 128 candidates)
+**Why this happens**: Some options are placeholders without token IDs yet (e.g., "Person N" in 2028 election)
+**Solutions**:
+1. Extract the entire event instead: `polymarket-extract "EVENT_URL" --extract-all-markets`
+2. Try a different candidate/option that is already active
+3. The tool will automatically skip inactive options and show statistics
+
 #### "zsh: killed" or Process Killed
 **Problem**: Process terminated due to excessive memory usage
 **Solutions**:
-1. Use `--streaming` flag for CSV exports: `polymarket-extract "URL" --extract-all-markets -f csv --streaming`
-2. Enable all optimizations: `polymarket-extract "URL" --extract-all-markets -f csv --low-memory`
+1. Use `--streaming` flag for CSV exports: `polymarket-extract "URL" --extract-all-markets --streaming`
+2. Enable streaming mode: `polymarket-extract "URL" --extract-all-markets --streaming`
 3. Reduce data range: `-d 7` instead of default 30 days
 4. Extract fewer markets at once
 
 #### "invalid filters: 'startTs' and 'endTs' interval is too long"
-**Problem**: API rejects time range for new markets
+**Problem**: API rejects time range for markets (especially resolved ones)
 **Solutions**:
-1. Use fewer days: `-d 7` or `-d 3`
-2. Specify exact dates: `--start 2025-07-28 --end 2025-08-02`
-3. Check market creation date - new markets have limited history
+1. Use `--use-max-interval` for resolved markets to get all data
+2. Use `--auto-dates` to automatically find valid date range
+3. Use fewer days: `-d 7` or `-d 3`
+4. Specify exact dates: `--start 2025-07-28 --end 2025-08-02`
+5. Check market creation date - new markets have limited history
 
 #### File Extension Issues
 **Problem**: Excel files created with .excel extension
@@ -756,9 +813,8 @@ flake8 polymarket/
 
 ### Memory Limitations
 - Regular DataFrame mode requires ~800MB per market for large datasets
-- Excel export requires entire dataset in memory
-- Streaming mode only available for CSV format
-- Large events (20+ markets) should use streaming or low-memory mode
+- Streaming mode reduces memory usage to <1GB for any event size
+- Large events (20+ markets) should use streaming mode
 
 ## Contributing
 
