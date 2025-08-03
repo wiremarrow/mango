@@ -35,6 +35,28 @@ pip install -e .
 - Python 3.9+
 - Dependencies listed in `requirements.txt`
 
+### Development Setup
+
+For development and testing:
+```bash
+# Install development dependencies
+pip install -r requirements-dev.txt
+
+# Or using setup.py extras
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Run tests with coverage
+pytest --cov=polymarket
+
+# Run code quality checks
+black polymarket/
+mypy polymarket/
+flake8 polymarket/
+```
+
 ## Quick Start
 
 ### Mango CLI - New Enhanced Commands
@@ -762,6 +784,35 @@ flake8 polymarket/
 - Regular DataFrame mode requires ~800MB per market for large datasets
 - Streaming mode reduces memory usage to <1GB for any event size
 - Large events (20+ markets) should use streaming mode
+
+## Testing
+
+The project includes a comprehensive test suite using pytest:
+
+```bash
+# Run all tests
+pytest
+
+# Run with coverage report
+pytest --cov=polymarket --cov-report=html
+
+# Run specific test file
+pytest tests/unit/test_api.py
+
+# Run tests with verbose output
+pytest -v
+
+# Run only unit tests
+pytest tests/unit/
+
+# Run only integration tests  
+pytest tests/integration/
+```
+
+Test structure:
+- `tests/unit/` - Unit tests for individual modules
+- `tests/integration/` - Integration tests for complete workflows
+- `tests/conftest.py` - Shared pytest fixtures
 
 ## Contributing
 
